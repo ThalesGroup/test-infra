@@ -30,8 +30,10 @@ import (
 
 	"cloud.google.com/go/storage"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/test-infra/pkg/io"
+
+	"k8s.io/test-infra/prow/flagutil"
 	"k8s.io/test-infra/prow/gerrit/client"
+	"k8s.io/test-infra/prow/io"
 )
 
 type fakeOpener struct{}
@@ -40,7 +42,7 @@ func (o fakeOpener) Reader(ctx context.Context, path string) (io.ReadCloser, err
 	return nil, storage.ErrObjectNotExist
 }
 
-func (o fakeOpener) Writer(ctx context.Context, path string) (io.WriteCloser, error) {
+func (o fakeOpener) Writer(ctx context.Context, path string, _ ...io.WriterOptions) (io.WriteCloser, error) {
 	return nil, errors.New("do not call Writer")
 }
 
@@ -78,6 +80,24 @@ func TestFlags(t *testing.T) {
 			del:      sets.NewString("--dry-run"),
 			expected: func(o *options) {},
 		},
+		{
+			name: "gcs credentials are set",
+			args: map[string]string{
+				"--gcs-credentials-file": "/creds",
+			},
+			expected: func(o *options) {
+				o.storage.GCSCredentialsFile = "/creds"
+			},
+		},
+		{
+			name: "s3 credentials are set",
+			args: map[string]string{
+				"--s3-credentials-file": "/creds",
+			},
+			expected: func(o *options) {
+				o.storage.S3CredentialsFile = "/creds"
+			},
+		},
 	}
 
 	for _, tc := range cases {
@@ -87,6 +107,10 @@ func TestFlags(t *testing.T) {
 				lastSyncFallback: "gs://path",
 				configPath:       "yo",
 				dryRun:           false,
+				instrumentationOptions: flagutil.InstrumentationOptions{
+					MetricsPort: flagutil.DefaultMetricsPort,
+					PProfPort:   flagutil.DefaultPProfPort,
+				},
 			}
 			expected.projects.Set("foo=bar")
 			if tc.expected != nil {
@@ -111,7 +135,7 @@ func TestFlags(t *testing.T) {
 			}
 			fs := flag.NewFlagSet("fake-flags", flag.PanicOnError)
 			actual := gatherOptions(fs, args...)
-			switch err := actual.Validate(); {
+			switch err := actual.validate(); {
 			case err != nil:
 				if !tc.err {
 					t.Errorf("unexpected error: %v", err)

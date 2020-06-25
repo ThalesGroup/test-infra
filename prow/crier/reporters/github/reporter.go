@@ -21,12 +21,13 @@ package github
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/sirupsen/logrus"
 
-	"k8s.io/test-infra/prow/apis/prowjobs/v1"
+	v1 "k8s.io/test-infra/prow/apis/prowjobs/v1"
 	"k8s.io/test-infra/prow/config"
 	"k8s.io/test-infra/prow/gerrit/client"
 	"k8s.io/test-infra/prow/github/report"
@@ -147,7 +148,12 @@ func (c *Client) Report(pj *v1.ProwJob) ([]*v1.ProwJob, error) {
 	}
 
 	// TODO(krzyzacy): ditch ReportTemplate, and we can drop reference to config.Getter
-	return []*v1.ProwJob{pj}, report.Report(c.gc, c.config().Plank.ReportTemplate, *pj, c.config().GitHubReporter.JobTypesToReport)
+	err := report.Report(c.gc, c.config().Plank.ReportTemplateForRepo(pj.Spec.Refs), *pj, c.config().GitHubReporter.JobTypesToReport)
+	if err != nil && strings.Contains(err.Error(), "This SHA and context has reached the maximum number of statuses") {
+		// This is completely unrecoverable, so just swallow the error to make sure we wont retry, even when crier gets restarted.
+		err = nil
+	}
+	return []*v1.ProwJob{pj}, err
 }
 
 func lockKeyForPJ(pj *v1.ProwJob) (*simplePull, error) {

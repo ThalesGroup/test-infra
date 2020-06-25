@@ -16,7 +16,7 @@ periodics:
     testgrid-num-failures-to-alert: "8"
     testgrid-alert-stale-results-hours: "16"
   decoration_config:
-    timeout: 40m
+    timeout: 60m
   extra_refs:
   - org: kubernetes
     repo: kubernetes
@@ -28,7 +28,7 @@ periodics:
     path_alias: k8s.io/kubeadm
   spec:
     containers:
-    - image: gcr.io/k8s-testimages/kubekins-e2e:v20200311-1e25827-master
+    - image: gcr.io/k8s-testimages/kubekins-e2e:v20200623-2424179-master
       command:
       - runner.sh
       - "../kubeadm/kinder/ci/kinder-run.sh"
@@ -56,7 +56,7 @@ periodics:
     testgrid-num-failures-to-alert: "4"
     testgrid-alert-stale-results-hours: "48"
   decoration_config:
-    timeout: 40m
+    timeout: 60m
   extra_refs:
   - org: kubernetes
     repo: kubernetes
@@ -68,7 +68,7 @@ periodics:
     path_alias: k8s.io/kubeadm
   spec:
     containers:
-    - image: gcr.io/k8s-testimages/kubekins-e2e:v20200311-1e25827-1.18
+    - image: gcr.io/k8s-testimages/kubekins-e2e:v20200623-2424179-1.18
       command:
       - runner.sh
       - "../kubeadm/kinder/ci/kinder-run.sh"
@@ -96,7 +96,7 @@ periodics:
     testgrid-num-failures-to-alert: "4"
     testgrid-alert-stale-results-hours: "48"
   decoration_config:
-    timeout: 40m
+    timeout: 60m
   extra_refs:
   - org: kubernetes
     repo: kubernetes
@@ -108,7 +108,7 @@ periodics:
     path_alias: k8s.io/kubeadm
   spec:
     containers:
-    - image: gcr.io/k8s-testimages/kubekins-e2e:v20200311-1e25827-1.17
+    - image: gcr.io/k8s-testimages/kubekins-e2e:v20200623-2424179-1.17
       command:
       - runner.sh
       - "../kubeadm/kinder/ci/kinder-run.sh"
@@ -136,7 +136,7 @@ periodics:
     testgrid-num-failures-to-alert: "4"
     testgrid-alert-stale-results-hours: "48"
   decoration_config:
-    timeout: 40m
+    timeout: 60m
   extra_refs:
   - org: kubernetes
     repo: kubernetes
@@ -148,52 +148,12 @@ periodics:
     path_alias: k8s.io/kubeadm
   spec:
     containers:
-    - image: gcr.io/k8s-testimages/kubekins-e2e:v20200311-1e25827-1.16
+    - image: gcr.io/k8s-testimages/kubekins-e2e:v20200623-2424179-1.16
       command:
       - runner.sh
       - "../kubeadm/kinder/ci/kinder-run.sh"
       args:
       - "upgrade-1.15-1.16"
-      securityContext:
-        privileged: true
-      resources:
-        requests:
-          memory: "9000Mi"
-          cpu: 2000m
-
-- name: ci-kubernetes-e2e-kubeadm-kinder-upgrade-1-14-1-15
-  interval: 12h
-  decorate: true
-  labels:
-    preset-dind-enabled: "true"
-    preset-kind-volume-mounts: "true"
-  annotations:
-    testgrid-dashboards: sig-cluster-lifecycle-kubeadm,sig-release-1.15-informing
-    testgrid-tab-name: kubeadm-kinder-upgrade-1-14-1-15
-    testgrid-alert-email: kubernetes-sig-cluster-lifecycle+testgrid@googlegroups.com
-    description: "OWNER: sig-cluster-lifecycle (kinder); Uses kubeadm/kinder to create a cluster, upgrade it and run kubeadm-e2e and the conformance suite"
-    testgrid-num-columns-recent: "20"
-    testgrid-num-failures-to-alert: "4"
-    testgrid-alert-stale-results-hours: "48"
-  decoration_config:
-    timeout: 40m
-  extra_refs:
-  - org: kubernetes
-    repo: kubernetes
-    base_ref: release-1.15
-    path_alias: k8s.io/kubernetes
-  - org: kubernetes
-    repo: kubeadm
-    base_ref: master
-    path_alias: k8s.io/kubeadm
-  spec:
-    containers:
-    - image: gcr.io/k8s-testimages/kubekins-e2e:v20200311-1e25827-1.15
-      command:
-      - runner.sh
-      - "../kubeadm/kinder/ci/kinder-run.sh"
-      args:
-      - "upgrade-1.14-1.15"
       securityContext:
         privileged: true
       resources:

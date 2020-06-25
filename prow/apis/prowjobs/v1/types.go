@@ -21,12 +21,14 @@ import (
 	"errors"
 	"fmt"
 	"mime"
+	"net/url"
 	"strings"
 	"time"
 
 	pipelinev1alpha1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	prowgithub "k8s.io/test-infra/prow/github"
 )
 
@@ -52,7 +54,7 @@ type ProwJobState string
 const (
 	// TriggeredState means the job has been created but not yet scheduled.
 	TriggeredState ProwJobState = "triggered"
-	// PendingState means the job is scheduled but not yet running.
+	// PendingState means the job is currently running and we are waiting for it to finish.
 	PendingState ProwJobState = "pending"
 	// SuccessState means the job completed without error (exit 0)
 	SuccessState ProwJobState = "success"
@@ -79,6 +81,16 @@ const (
 const (
 	// DefaultClusterAlias specifies the default cluster key to schedule jobs.
 	DefaultClusterAlias = "default"
+)
+
+const (
+	// StartedStatusFile is the JSON file that stores information about the build
+	// at the start ob the build. See testgrid/metadata/job.go for more details.
+	StartedStatusFile = "started.json"
+
+	// FinishedStatusFile is the JSON file that stores information about the build
+	// after its completion. See testgrid/metadata/job.go for more details.
+	FinishedStatusFile = "finished.json"
 )
 
 // +genclient
@@ -156,7 +168,7 @@ type ProwJobSpec struct {
 	ReporterConfig *ReporterConfig `json:"reporter_config,omitempty"`
 
 	// RerunAuthConfig holds information about which users can rerun the job
-	RerunAuthConfig RerunAuthConfig `json:"rerun_auth_config,omitempty"`
+	RerunAuthConfig *RerunAuthConfig `json:"rerun_auth_config,omitempty"`
 
 	// Hidden specifies if the Job is considered hidden.
 	// Hidden jobs are only shown by deck instances that have the
@@ -192,6 +204,9 @@ type RerunAuthConfig struct {
 // IsSpecifiedUser returns true if AllowAnyone is set to true or if the given user is
 // specified as a permitted GitHubUser
 func (rac *RerunAuthConfig) IsAuthorized(user string, cli prowgithub.RerunClient) (bool, error) {
+	if rac == nil {
+		return false, nil
+	}
 	if rac.AllowAnyone {
 		return true, nil
 	}
@@ -236,6 +251,31 @@ func (rac *RerunAuthConfig) IsAuthorized(user string, cli prowgithub.RerunClient
 		}
 	}
 	return false, nil
+}
+
+// Validate validates the RerunAuthConfig fields.
+func (rac *RerunAuthConfig) Validate() error {
+	if rac == nil {
+		return nil
+	}
+
+	hasWhiteList := len(rac.GitHubUsers) > 0 || len(rac.GitHubTeamIDs) > 0 || len(rac.GitHubTeamSlugs) > 0 || len(rac.GitHubOrgs) > 0
+
+	// If a whitelist is specified, the user probably does not intend for anyone to be able to rerun any job.
+	if rac.AllowAnyone && hasWhiteList {
+		return errors.New("allow anyone is set to true and permitted users or groups are specified")
+	}
+
+	return nil
+}
+
+// IsAllowAnyone checks if anyone can rerun the job.
+func (rac *RerunAuthConfig) IsAllowAnyone() bool {
+	if rac == nil {
+		return false
+	}
+
+	return rac.AllowAnyone
 }
 
 type ReporterConfig struct {
@@ -303,6 +343,9 @@ type DecorationConfig struct {
 	// GCSCredentialsSecret is the name of the Kubernetes secret
 	// that holds GCS push credentials.
 	GCSCredentialsSecret string `json:"gcs_credentials_secret,omitempty"`
+	// S3CredentialsSecret is the name of the Kubernetes secret
+	// that holds blob storage push credentials.
+	S3CredentialsSecret string `json:"s3_credentials_secret,omitempty"`
 	// SSHKeySecrets are the names of Kubernetes secrets that contain
 	// SSK keys which should be used during the cloning process.
 	SSHKeySecrets []string `json:"ssh_key_secrets,omitempty"`
@@ -433,8 +476,8 @@ func (d *DecorationConfig) Validate() error {
 	if d.GCSConfiguration == nil {
 		return errors.New("GCS upload configuration is not specified")
 	}
-	if d.GCSCredentialsSecret == "" {
-		return errors.New("GCS upload credential secret is not specified")
+	if d.GCSCredentialsSecret == "" && d.S3CredentialsSecret == "" {
+		return errors.New("neither GCS nor S3 credential secret are specified")
 	}
 	if err := d.GCSConfiguration.Validate(); err != nil {
 		return fmt.Errorf("GCS configuration is invalid: %v", err)
@@ -501,7 +544,10 @@ const (
 // GCSConfiguration holds options for pushing logs and
 // artifacts to GCS from a job.
 type GCSConfiguration struct {
-	// Bucket is the GCS bucket to upload to
+	// Bucket is the bucket to upload to, it can be:
+	// * a GCS bucket: with gs:// prefix
+	// * a S3 bucket: with s3:// prefix
+	// * a GCS bucket: without a prefix (deprecated, it's discouraged to use Bucket without prefix please add the gs:// prefix)
 	Bucket string `json:"bucket,omitempty"`
 	// PathPrefix is an optional path that follows the
 	// bucket name and comes before any structure
@@ -520,7 +566,7 @@ type GCSConfiguration struct {
 	// to media types, for example: MediaTypes["log"] = "text/plain"
 	MediaTypes map[string]string `json:"mediaTypes,omitempty"`
 
-	// LocalOutputDir specifies a directory where files should be copied INSTEAD of uploading to GCS.
+	// LocalOutputDir specifies a directory where files should be copied INSTEAD of uploading to blob storage.
 	// This option is useful for testing jobs that use the pod-utilities without actually uploading.
 	LocalOutputDir string `json:"local_output_dir,omitempty"`
 }
@@ -557,6 +603,10 @@ func (g *GCSConfiguration) ApplyDefault(def *GCSConfiguration) *GCSConfiguration
 		merged.DefaultRepo = def.DefaultRepo
 	}
 
+	if merged.MediaTypes == nil {
+		merged.MediaTypes = map[string]string{}
+	}
+
 	for extension, mediaType := range def.MediaTypes {
 		merged.MediaTypes[extension] = mediaType
 	}
@@ -572,6 +622,9 @@ func (g *GCSConfiguration) ApplyDefault(def *GCSConfiguration) *GCSConfiguration
 
 // Validate ensures all the values set in the GCSConfiguration are valid.
 func (g *GCSConfiguration) Validate() error {
+	if _, err := ParsePath(g.Bucket); err != nil {
+		return err
+	}
 	for _, mediaType := range g.MediaTypes {
 		if _, _, err := mime.ParseMediaType(mediaType); err != nil {
 			return fmt.Errorf("invalid extension media type %q: %v", mediaType, err)
@@ -584,6 +637,36 @@ func (g *GCSConfiguration) Validate() error {
 		return fmt.Errorf("default org and repo must be provided for GCS strategy %q", g.PathStrategy)
 	}
 	return nil
+}
+
+type ProwPath url.URL
+
+func (pp ProwPath) StorageProvider() string {
+	return pp.Scheme
+}
+
+func (pp ProwPath) Bucket() string {
+	return pp.Host
+}
+
+func (pp ProwPath) FullPath() string {
+	return pp.Host + pp.Path
+}
+
+// ParsePath tries to extract the ProwPath from, e.g.:
+// * <bucket-name> (storageProvider gs)
+// * <storage-provider>://<bucket-name>
+func ParsePath(bucket string) (*ProwPath, error) {
+	// default to GCS if no storage-provider is specified
+	if !strings.Contains(bucket, "://") {
+		bucket = "gs://" + bucket
+	}
+	parsedBucket, err := url.Parse(bucket)
+	if err != nil {
+		return nil, fmt.Errorf("path %q has invalid format, expected either <bucket-name>[/<path>] or <storage-provider>://<bucket-name>[/<path>]", bucket)
+	}
+	pp := ProwPath(*parsedBucket)
+	return &pp, nil
 }
 
 // ProwJobStatus provides runtime metadata, such as when it finished, whether it is running, etc.

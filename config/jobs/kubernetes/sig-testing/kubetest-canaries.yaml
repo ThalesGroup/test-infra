@@ -1,59 +1,54 @@
 presubmits:
   kubernetes/kubernetes:
   - name: pull-kubernetes-bazel-build-canary
+    decorate: true
     always_run: false
     labels:
       preset-service-account: "true"
       preset-bazel-scratch-dir: "true"
-      preset-bazel-remote-cache-enabled: "true"
-    spec:
-      containers:
-      - image: gcr.io/k8s-testimages/kubekins-e2e:latest-experimental
-        imagePullPolicy: Always
-        args:
-        - "--job=$(JOB_NAME)"
-        - "--repo=k8s.io/$(REPO_NAME)=$(PULL_REFS)"
-        - "--service-account=/etc/service-account/service-account.json"
-        - "--upload=gs://kubernetes-jenkins/pr-logs"
-        - "--scenario=kubernetes_bazel"
-        - "--timeout=60"
-        - "--" # end bootstrap args, scenario args below
-        - "--build=//... -//vendor/..."
-        - "--release=//build/release-tars"
-        resources:
-          requests:
-            memory: "6Gi"
-
     annotations:
       testgrid-dashboards: sig-testing-canaries
       testgrid-tab-name: pull-bazel-build
+    extra_refs:
+    - base_ref: master
+      org: kubernetes
+      repo: test-infra
+    spec:
+      containers:
+      - image: gcr.io/k8s-testimages/launcher.gcr.io/google/bazel:2.2.0-from-0.23.2
+        command:
+        - bash
+        args:
+        - -c
+        - |
+          ../test-infra/hack/bazel.sh build --config=remote --remote_instance_name=projects/k8s-prow-builds/instances/default_instance -- //... -//vendor/... -//build/... //build/release-tars
   - name: pull-kubernetes-bazel-test-canary
+    decorate: true
     always_run: false
     labels:
       preset-service-account: "true"
       preset-bazel-scratch-dir: "true"
-      preset-bazel-remote-cache-enabled: "true"
-    spec:
-      containers:
-      - image: gcr.io/k8s-testimages/kubekins-e2e:latest-experimental
-        imagePullPolicy: Always
-        args:
-        - "--job=$(JOB_NAME)"
-        - "--repo=k8s.io/$(REPO_NAME)=$(PULL_REFS)"
-        - "--service-account=/etc/service-account/service-account.json"
-        - "--upload=gs://kubernetes-jenkins/pr-logs"
-        - "--scenario=kubernetes_execute_bazel"
-        - "--timeout=60"
-        - "--" # end bootstrap args, scenario args below
-        - "make"
-        - "bazel-test"
-        resources:
-          requests:
-            memory: "6Gi"
-
     annotations:
       testgrid-dashboards: sig-testing-canaries
       testgrid-tab-name: pull-bazel-test
+    extra_refs:
+    - base_ref: master
+      org: kubernetes
+      repo: test-infra
+    spec:
+      containers:
+      - image: gcr.io/k8s-testimages/launcher.gcr.io/google/bazel:2.2.0-from-0.23.2
+        command:
+        - ../test-infra/hack/bazel.sh
+        args:
+        - test
+        - --config=unit
+        - --config=remote
+        - --remote_instance_name=projects/k8s-prow-builds/instances/default_instance
+        - //...
+        - --
+        - -//build/...
+        - -//vendor/...
   - name: pull-kubernetes-bazel-test-integration-canary
     always_run: false
     labels:
@@ -215,6 +210,7 @@ periodics:
       - --cluster=e2e-kops-aws-canary.test-cncf-aws.k8s.io
       - --deployment=kops
       - --env=KUBE_SSH_USER=admin
+      - --env=KOPS_RUN_TOO_NEW_VERSION=1
       - --extract=ci/latest
       - --ginkgo-parallel
       - --kops-etcd-version=3.2.24
@@ -229,7 +225,7 @@ periodics:
       image: gcr.io/k8s-testimages/kubekins-e2e:latest-master
       imagePullPolicy: Always
   annotations:
-    testgrid-dashboards: google-aws, sig-cluster-lifecycle-kops, sig-testing-canaries
+    testgrid-dashboards: google-aws, kops-misc, sig-testing-canaries
     testgrid-tab-name: kops-aws-canary
 
 - interval: 30m
@@ -248,6 +244,7 @@ periodics:
       args:
       - --cluster=e2e-kops-gce-canary.k8s.local
       - --deployment=kops
+      - --env=KOPS_RUN_TOO_NEW_VERSION=1
       - --extract=ci/latest
       - --ginkgo-parallel=30
       - --kops-priority-path=/workspace/kubernetes/platforms/linux/amd64
@@ -260,7 +257,7 @@ periodics:
       imagePullPolicy: Always
 
   annotations:
-    testgrid-dashboards: google-kops-gce, sig-cluster-lifecycle-kops
+    testgrid-dashboards: google-kops-gce, kops-misc
     testgrid-tab-name: kops-gce-canary
 - name: ci-kubernetes-e2e-node-canary
   interval: 1h

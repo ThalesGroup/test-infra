@@ -1,11 +1,11 @@
 periodics:
 - name: kubeadm-windows-gcp-k8s-stable
-  interval: 2h
+  interval: 180m
   labels:
     preset-service-account: "true"
   decorate: true
   decoration_config:
-    timeout: 2h
+    timeout: 180m
   extra_refs:
   - org: kubernetes-sigs
     repo: sig-windows-tools
@@ -21,7 +21,7 @@ periodics:
     path_alias: k8s.io/kubernetes
   spec:
     containers:
-    - image: gcr.io/k8s-testimages/kubekins-e2e:v20200311-1e25827-master
+    - image: gcr.io/k8s-testimages/kubekins-e2e:v20200623-2424179-master
       command:
       - "runner.sh"
       - "./kubeadm/hack/ci-e2e.sh"

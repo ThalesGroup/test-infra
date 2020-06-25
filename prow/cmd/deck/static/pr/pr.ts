@@ -536,7 +536,7 @@ function createPRCardTitle(pr: PullRequest, tidePools: TidePool[], jobStatus: Va
     subtitle.classList.add("mdl-card__subtitle-text");
 
     const link = document.createElement("a");
-    link.href = `https://github.com/${pr.Repository.NameWithOwner}/pull/${pr.Number}`;
+    link.href = `/github-link?dest=${pr.Repository.NameWithOwner}/pull/${pr.Number}`;
     link.appendChild(title);
 
     const prTitleText = document.createElement("div");
@@ -1013,9 +1013,10 @@ function createPRCardBody(pr: PullRequest, builds: UnifiedContext[], queries: Pr
     cardBody.appendChild(createMergeLabelStatus(nodes, queries));
     cardBody.appendChild(createMergeConflictStatus(mergeable));
     cardBody.appendChild(createGenericConflictStatus(pr, branchConflict, `Merging into branch ${pr.BaseRef.Name} is currently forbidden`));
-    cardBody.appendChild(createGenericConflictStatus(pr, authorConflict, `Only merges with author ${queries[0].author} are currently allowed`));
-    cardBody.appendChild(createGenericConflictStatus(pr, milestoneConflict, `Only merges into milestone ${queries[0].milestone} are currently allowed`));
-
+    if (queries.length) {
+        cardBody.appendChild(createGenericConflictStatus(pr, authorConflict, `Only merges with author ${queries[0].author} are currently allowed`));
+        cardBody.appendChild(createGenericConflictStatus(pr, milestoneConflict, `Only merges into milestone ${queries[0].milestone} are currently allowed`));
+    }
     return cardBody;
 }
 

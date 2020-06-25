@@ -2584,6 +2584,10 @@ func (f fakeRepoClient) UpdateRepo(owner, name string, want github.RepoUpdateReq
 		return nil, fmt.Errorf("UpdateRepo() called on repo that does not exist")
 	}
 
+	if have.Archived {
+		return nil, fmt.Errorf("Repository was archived so is read-only.")
+	}
+
 	updateString := func(have, want *string) {
 		if want != nil {
 			*have = *want
@@ -2761,7 +2765,9 @@ func TestConfigureRepos(t *testing.T) {
 		{
 			// https://developer.github.com/v3/repos/#edit
 			// "Note: You cannot unarchive repositories through the API."
-			description: "request to unarchive a repo fails, but updates other fields",
+			// Archived repositories are read-only, and updates fail with 403:
+			// "Repository was archived so is read-only."
+			description: "request to unarchive a repo fails, repo is read-only",
 			orgConfig: org.Config{
 				Repos: map[string]org.Repo{
 					oldName: {Archived: &no, Description: &updated},
@@ -2769,7 +2775,22 @@ func TestConfigureRepos(t *testing.T) {
 			},
 			repos:         []github.FullRepo{{Repo: github.Repo{Name: oldName, Archived: true, Description: "OLD"}}},
 			expectError:   true,
-			expectedRepos: []github.Repo{{Name: oldName, Archived: true, Description: updated}},
+			expectedRepos: []github.Repo{{Name: oldName, Archived: true, Description: "OLD"}},
+		},
+		{
+			// https://developer.github.com/v3/repos/#edit
+			// "Note: You cannot unarchive repositories through the API."
+			// Archived repositories are read-only, and updates fail with 403:
+			// "Repository was archived so is read-only."
+			description: "no field changes on archived repo",
+			orgConfig: org.Config{
+				Repos: map[string]org.Repo{
+					oldName: {Archived: &yes, Description: &updated},
+				},
+			},
+			repos:         []github.FullRepo{{Repo: github.Repo{Name: oldName, Archived: true, Description: "OLD"}}},
+			expectError:   false,
+			expectedRepos: []github.Repo{{Name: oldName, Archived: true, Description: "OLD"}},
 		},
 		{
 			description: "request to archive repo fails when not allowed, but updates other fields",
@@ -3079,75 +3100,6 @@ func TestNewRepoUpdateRequest(t *testing.T) {
 			update := newRepoUpdateRequest(tc.current, tc.name, tc.newState)
 			if !reflect.DeepEqual(tc.expected, update) {
 				t.Errorf("%s: update request differs from expected:%s", tc.description, diff.ObjectReflectDiff(tc.expected, update))
-			}
-		})
-	}
-}
-
-func TestPruneRepoDefaults(t *testing.T) {
-	empty := ""
-	nonEmpty := "string that is not empty"
-	yes := true
-	no := false
-	master := "master"
-	notMaster := "not-master"
-	testCases := []struct {
-		description string
-		repo        org.Repo
-		expected    org.Repo
-	}{
-		{
-			description: "default values are pruned",
-			repo: org.Repo{
-				Description:      &empty,
-				HomePage:         &empty,
-				Private:          &no,
-				HasIssues:        &yes,
-				HasProjects:      &yes,
-				HasWiki:          &yes,
-				AllowSquashMerge: &yes,
-				AllowMergeCommit: &yes,
-				AllowRebaseMerge: &yes,
-				DefaultBranch:    &master,
-				Archived:         &no,
-			},
-			expected: org.Repo{HasProjects: &yes},
-		},
-		{
-			description: "non-default values are not pruned",
-			repo: org.Repo{
-				Description:      &nonEmpty,
-				HomePage:         &nonEmpty,
-				Private:          &yes,
-				HasIssues:        &no,
-				HasProjects:      &no,
-				HasWiki:          &no,
-				AllowSquashMerge: &no,
-				AllowMergeCommit: &no,
-				AllowRebaseMerge: &no,
-				DefaultBranch:    &notMaster,
-				Archived:         &yes,
-			},
-			expected: org.Repo{Description: &nonEmpty,
-				HomePage:         &nonEmpty,
-				Private:          &yes,
-				HasIssues:        &no,
-				HasProjects:      &no,
-				HasWiki:          &no,
-				AllowSquashMerge: &no,
-				AllowMergeCommit: &no,
-				AllowRebaseMerge: &no,
-				DefaultBranch:    &notMaster,
-				Archived:         &yes,
-			},
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.description, func(t *testing.T) {
-			pruned := pruneRepoDefaults(tc.repo)
-			if !reflect.DeepEqual(tc.expected, pruned) {
-				t.Errorf("%s: result differs from expected:\n", diff.ObjectReflectDiff(tc.expected, pruned))
 			}
 		})
 	}

@@ -30,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/diff"
+	"k8s.io/apimachinery/pkg/util/sets"
 
 	prowapi "k8s.io/test-infra/prow/apis/prowjobs/v1"
 	"k8s.io/test-infra/prow/config"
@@ -260,8 +261,9 @@ func TestPartitionActive(t *testing.T) {
 	tests := []struct {
 		pjs []prowapi.ProwJob
 
-		pending   map[string]struct{}
-		triggered map[string]struct{}
+		pending   sets.String
+		triggered sets.String
+		aborted   sets.String
 	}{
 		{
 			pjs: []prowapi.ProwJob{
@@ -305,27 +307,46 @@ func TestPartitionActive(t *testing.T) {
 						State: prowapi.PendingState,
 					},
 				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "aborted",
+					},
+					Status: prowapi.ProwJobStatus{
+						State: prowapi.AbortedState,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "aborted-and-completed",
+					},
+					Status: prowapi.ProwJobStatus{
+						State:          prowapi.AbortedState,
+						CompletionTime: &[]metav1.Time{metav1.Now()}[0],
+					},
+				},
 			},
-			pending: map[string]struct{}{
-				"bar": {}, "bak": {},
-			},
-			triggered: map[string]struct{}{
-				"foo": {},
-			},
+			pending:   sets.NewString("bar", "bak"),
+			triggered: sets.NewString("foo"),
+			aborted:   sets.NewString("aborted"),
 		},
 	}
 
 	for i, test := range tests {
 		t.Logf("test run #%d", i)
-		pendingCh, triggeredCh := PartitionActive(test.pjs)
+		pendingCh, triggeredCh, abortedCh := PartitionActive(test.pjs)
 		for job := range pendingCh {
-			if _, ok := test.pending[job.ObjectMeta.Name]; !ok {
+			if !test.pending.Has(job.Name) {
 				t.Errorf("didn't find pending job %#v", job)
 			}
 		}
 		for job := range triggeredCh {
-			if _, ok := test.triggered[job.ObjectMeta.Name]; !ok {
+			if !test.triggered.Has(job.Name) {
 				t.Errorf("didn't find triggered job %#v", job)
+			}
+		}
+		for job := range abortedCh {
+			if !test.aborted.Has(job.Name) {
+				t.Errorf("didn't find aborted job %#v", job)
 			}
 		}
 	}
@@ -676,10 +697,11 @@ func TestNewProwJobWithAnnotations(t *testing.T) {
 
 func TestJobURL(t *testing.T) {
 	var testCases = []struct {
-		name     string
-		plank    config.Plank
-		pj       prowapi.ProwJob
-		expected string
+		name        string
+		plank       config.Plank
+		pj          prowapi.ProwJob
+		expected    string
+		expectedErr string
 	}{
 		{
 			name: "non-decorated job uses template",
@@ -712,7 +734,7 @@ func TestJobURL(t *testing.T) {
 			expected: "periodic",
 		},
 		{
-			name: "decorated job with prefix uses gcslib",
+			name: "decorated job with prefix uses gcsupload",
 			plank: config.Plank{
 				JobURLPrefixConfig: map[string]string{"*": "https://gubernator.com/build"},
 			},
@@ -730,13 +752,79 @@ func TestJobURL(t *testing.T) {
 			}},
 			expected: "https://gubernator.com/build/bucket/pr-logs/pull/org_repo/1",
 		},
+		{
+			name: "decorated job with prefix uses gcsupload and new bucket format with gcs",
+			plank: config.Plank{
+				JobURLPrefixConfig: map[string]string{"*": "https://prow.k8s.io/view/gcs"},
+			},
+			pj: prowapi.ProwJob{Spec: prowapi.ProwJobSpec{
+				Type: prowapi.PresubmitJob,
+				Refs: &prowapi.Refs{
+					Org:   "org",
+					Repo:  "repo",
+					Pulls: []prowapi.Pull{{Number: 1}},
+				},
+				DecorationConfig: &prowapi.DecorationConfig{GCSConfiguration: &prowapi.GCSConfiguration{
+					Bucket:       "gs://bucket",
+					PathStrategy: prowapi.PathStrategyExplicit,
+				}},
+			}},
+			expected: "https://prow.k8s.io/view/gcs/bucket/pr-logs/pull/org_repo/1",
+		},
+		{
+			name: "decorated job with prefix uses gcsupload and new bucket format with s3",
+			plank: config.Plank{
+				JobURLPrefixConfig: map[string]string{"*": "https://prow.k8s.io/view/s3"},
+			},
+			pj: prowapi.ProwJob{Spec: prowapi.ProwJobSpec{
+				Type: prowapi.PresubmitJob,
+				Refs: &prowapi.Refs{
+					Org:   "org",
+					Repo:  "repo",
+					Pulls: []prowapi.Pull{{Number: 1}},
+				},
+				DecorationConfig: &prowapi.DecorationConfig{GCSConfiguration: &prowapi.GCSConfiguration{
+					Bucket:       "s3://bucket",
+					PathStrategy: prowapi.PathStrategyExplicit,
+				}},
+			}},
+			expected: "https://prow.k8s.io/view/s3/bucket/pr-logs/pull/org_repo/1",
+		},
+		{
+			name: "decorated job with prefix uses gcsupload with valid bucket with multiple separators",
+			plank: config.Plank{
+				JobURLPrefixConfig: map[string]string{"*": "https://prow.k8s.io/view/s3"},
+			},
+			pj: prowapi.ProwJob{Spec: prowapi.ProwJobSpec{
+				Type: prowapi.PresubmitJob,
+				Refs: &prowapi.Refs{
+					Org:   "org",
+					Repo:  "repo",
+					Pulls: []prowapi.Pull{{Number: 1}},
+				},
+				DecorationConfig: &prowapi.DecorationConfig{GCSConfiguration: &prowapi.GCSConfiguration{
+					Bucket:       "gs://my-floppy-backup/a://doom2.wad.006",
+					PathStrategy: prowapi.PathStrategyExplicit,
+				}},
+			}},
+			expected: "https://prow.k8s.io/view/s3/my-floppy-backup/a:/doom2.wad.006/pr-logs/pull/org_repo/1",
+		},
 	}
 
 	logger := logrus.New()
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			if actual, expected := JobURL(testCase.plank, testCase.pj, logger.WithField("name", testCase.name)), testCase.expected; actual != expected {
-				t.Errorf("%s: expected URL to be %q but got %q", testCase.name, expected, actual)
+			actual, actualErr := JobURL(testCase.plank, testCase.pj, logger.WithField("name", testCase.name))
+			var actualErrStr string
+			if actualErr != nil {
+				actualErrStr = actualErr.Error()
+			}
+
+			if actualErrStr != testCase.expectedErr {
+				t.Errorf("%s: expectedErr = %v, but got %v", testCase.name, testCase.expectedErr, actualErrStr)
+			}
+			if actual != testCase.expected {
+				t.Errorf("%s: expected URL to be %q but got %q", testCase.name, testCase.expected, actual)
 			}
 		})
 	}

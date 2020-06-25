@@ -27,9 +27,10 @@ import (
 
 	"github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/test-infra/pkg/io"
-	"k8s.io/test-infra/prow/config"
 	"sigs.k8s.io/yaml"
+
+	"k8s.io/test-infra/prow/config"
+	"k8s.io/test-infra/prow/io"
 )
 
 type testOpener struct{}
@@ -38,7 +39,7 @@ func (t *testOpener) Reader(ctx context.Context, path string) (io.ReadCloser, er
 	return os.Open(path)
 }
 
-func (t *testOpener) Writer(ctx context.Context, path string) (io.WriteCloser, error) {
+func (t *testOpener) Writer(ctx context.Context, path string, _ ...io.WriterOptions) (io.WriteCloser, error) {
 	return os.Create(path)
 }
 
@@ -269,7 +270,7 @@ func getPresubmits(names []string) []config.Presubmit {
 				Spec: spec,
 			},
 			AlwaysRun: true,
-			Reporter:  config.Reporter{Context: "boo"},
+			Reporter:  config.Reporter{Context: name},
 		}
 		presubmits = append(presubmits, ps)
 	}

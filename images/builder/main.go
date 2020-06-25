@@ -38,6 +38,44 @@ const (
 	gcsLogsDir   = "/logs"
 )
 
+type Step struct {
+	Name string `yaml:"name"`
+	Args []string
+}
+
+// struct for images/<image>/cloudbuild.yaml
+// Example: images/alpine/cloudbuild.yaml
+type CloudBuildYAMLFile struct {
+	Steps         []Step `yaml:"steps"`
+	Substitutions map[string]string
+	Images        []string
+}
+
+func getProjectID() (string, error) {
+	cmd := exec.Command("gcloud", "config", "get-value", "project")
+	projectID, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to get project_id: %v", err)
+	}
+	return string(projectID), nil
+}
+
+func getImageName(o options, tag string, config string) (string, error) {
+	var cloudbuildyamlFile CloudBuildYAMLFile
+	buf, _ := ioutil.ReadFile(o.cloudbuildFile)
+	if err := yaml.Unmarshal(buf, &cloudbuildyamlFile); err != nil {
+		return "", fmt.Errorf("failed to get image name: %v", err)
+	}
+	var projectID, _ = getProjectID()
+	var imageNames = cloudbuildyamlFile.Images
+	r := strings.NewReplacer("$PROJECT_ID", strings.TrimSpace(projectID), "$_GIT_TAG", tag, "$_CONFIG", config)
+	var result string
+	for _, name := range imageNames {
+		result = result + r.Replace(name) + " "
+	}
+	return result, nil
+}
+
 func runCmd(command string, args ...string) error {
 	cmd := exec.Command(command, args...)
 	cmd.Stderr = os.Stderr
@@ -84,7 +122,12 @@ func (o *options) uploadBuildDir(targetBucket string) (string, error) {
 	defer os.Remove(name)
 
 	log.Printf("Creating source tarball at %s...\n", name)
-	if err := runCmd("tar", "--exclude", ".git", "-czf", name, "."); err != nil {
+	var args []string
+	if !o.withGitDirectory {
+		args = append(args, "--exclude", ".git")
+	}
+	args = append(args, "-czf", name, ".")
+	if err := runCmd("tar", args...); err != nil {
 		return "", fmt.Errorf("failed to tar files: %s", err)
 	}
 
@@ -145,14 +188,16 @@ func runSingleJob(o options, jobName, uploaded, version string, subs map[string]
 
 	cmd := exec.Command("gcloud", args...)
 
+	var logFilePath string
 	if o.logDir != "" {
-		p := path.Join(o.logDir, strings.Replace(jobName, "/", "-", -1)+".log")
-		f, err := os.Create(p)
+		logFilePath = path.Join(o.logDir, strings.Replace(jobName, "/", "-", -1)+".log")
+		f, err := os.Create(logFilePath)
 
 		if err != nil {
-			return fmt.Errorf("couldn't create %s: %v", p, err)
+			return fmt.Errorf("couldn't create %s: %v", logFilePath, err)
 		}
 
+		defer f.Sync()
 		defer f.Close()
 
 		cmd.Stdout = f
@@ -163,6 +208,10 @@ func runSingleJob(o options, jobName, uploaded, version string, subs map[string]
 	}
 
 	if err := cmd.Run(); err != nil {
+		if o.logDir != "" {
+			buildLog, _ := ioutil.ReadFile(logFilePath)
+			fmt.Println(string(buildLog))
+		}
 		return fmt.Errorf("error running %s: %v", cmd.Args, err)
 	}
 
@@ -226,11 +275,14 @@ func runBuildJobs(o options) []error {
 	if err != nil {
 		return []error{err}
 	}
+
 	if len(vs) == 0 {
 		log.Println("No variants.yaml, starting single build job...")
 		if err := runSingleJob(o, "build", uploaded, tag, getExtraSubs(o)); err != nil {
 			return []error{err}
 		}
+		var imageName, _ = getImageName(o, tag, "")
+		log.Printf("Successfully built image: %v \n", imageName)
 		return nil
 	}
 
@@ -248,6 +300,8 @@ func runBuildJobs(o options) []error {
 				errors = append(errors, fmt.Errorf("job %q failed: %v", job, err))
 				log.Printf("Job %q failed: %v\n", job, err)
 			} else {
+				var imageName, _ = getImageName(o, tag, job)
+				log.Printf("Successfully built image: %v \n", imageName)
 				log.Printf("Job %q completed.\n", job)
 			}
 		}(k, v)
@@ -267,6 +321,9 @@ type options struct {
 	noSource       bool
 	variant        string
 	envPassthrough string
+
+	// withGitDirectory will include the .git directory when uploading the source to GCB
+	withGitDirectory bool
 }
 
 func mergeMaps(maps ...map[string]string) map[string]string {
@@ -290,6 +347,7 @@ func parseFlags() options {
 	flag.BoolVar(&o.noSource, "no-source", false, "If true, no source will be uploaded with this build.")
 	flag.StringVar(&o.variant, "variant", "", "If specified, build only the given variant. An error if no variants are defined.")
 	flag.StringVar(&o.envPassthrough, "env-passthrough", "", "Comma-separated list of specified environment variables to be passed to GCB as substitutions with an _ prefix. If the variable doesn't exist, the substitution will exist but be empty.")
+	flag.BoolVar(&o.withGitDirectory, "with-git-dir", o.withGitDirectory, "If true, upload the .git directory to GCB, so we can e.g. get the git log and tag.")
 
 	flag.Parse()
 

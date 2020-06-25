@@ -10,10 +10,7 @@ presubmits:
       preset-bazel-scratch-dir: "true"
     spec:
       containers:
-      - image: launcher.gcr.io/google/bazel:2.0.0
-        env:
-        - name: USE_BAZEL_VERSION
-          value: real  # Ignore .bazelversion
+      - image: gcr.io/k8s-testimages/launcher.gcr.io/google/bazel:v20200609-e7bfd25-test-infra
         command:
         - hack/bazel.sh
         args:
@@ -34,7 +31,7 @@ presubmits:
       preset-service-account: "true"
     spec:
       containers:
-      - image: gcr.io/k8s-testimages/gubernator:0.4
+      - image: gcr.io/k8s-testimages/gubernator:v20200520-098b536
         command:
         - ./gubernator/test-gubernator.sh
         env:
@@ -53,7 +50,7 @@ presubmits:
       preset-service-account: "true"
     spec:
       containers:
-      - image: gcr.io/k8s-testimages/kubekins-e2e:v20200311-1e25827-experimental
+      - image: gcr.io/k8s-testimages/kubekins-e2e:v20200623-2424179-experimental
         command:
         - ./hack/verify-file-perms.sh
     annotations:
@@ -71,7 +68,7 @@ presubmits:
         - -c
         - config/jobs/.yamllint.conf
         - config/jobs
-        - prow/cluster
+        - config/prow/cluster
     annotations:
       testgrid-dashboards: presubmits-test-infra
       testgrid-tab-name: verify-yaml
@@ -81,7 +78,7 @@ presubmits:
     run_if_changed: '^(config/prow/(config|plugins).yaml$|config/jobs/.*.yaml$)'
     spec:
       containers:
-      - image: gcr.io/k8s-prow/checkconfig:v20200311-9d5dcfe00
+      - image: gcr.io/k8s-prow/checkconfig:v20200624-16c251c027
         command:
         - /checkconfig
         args:

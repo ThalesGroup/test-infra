@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/sirupsen/logrus"
 )
@@ -61,6 +62,8 @@ type Interactor interface {
 	Diff(head, sha string) (changes []string, err error)
 	// MergeCommitsExistBetween determines if merge commits exist between target and HEAD
 	MergeCommitsExistBetween(target, head string) (bool, error)
+	// ShowRef returns the commit for a commitlike. Unlike rev-parse it does not require a checkout.
+	ShowRef(commitlike string) (string, error)
 }
 
 // cacher knows how to cache and update repositories in a central cache
@@ -78,7 +81,7 @@ type cloner interface {
 }
 
 type interactor struct {
-	executor Executor
+	executor executor
 	remote   RemoteResolver
 	dir      string
 	logger   *logrus.Entry
@@ -275,6 +278,20 @@ func (i *interactor) FetchRef(refspec string) error {
 	return nil
 }
 
+// FetchFromRemote fetches all update from a specific remote and branch and leaves it as FETCH_HEAD.
+func (i *interactor) FetchFromRemote(remote RemoteResolver, branch string) error {
+	r, err := remote()
+	if err != nil {
+		return fmt.Errorf("couldn't get remote: %v", err)
+	}
+
+	i.logger.Infof("Fetching %s from %s", branch, r)
+	if out, err := i.executor.Run("fetch", r, branch); err != nil {
+		return fmt.Errorf("error fetching %s from %s: %v %v", branch, r, err, string(out))
+	}
+	return nil
+}
+
 // CheckoutPullRequest fetches the HEAD of a pull request using a synthetic refspec
 // available on GitHub remotes and creates a branch at that commit.
 func (i *interactor) CheckoutPullRequest(number int) error {
@@ -326,4 +343,13 @@ func (i *interactor) MergeCommitsExistBetween(target, head string) (bool, error)
 		return false, fmt.Errorf("error verifying if merge commits exist between %q and %q: %v %s", target, head, err, string(out))
 	}
 	return len(out) != 0, nil
+}
+
+func (i *interactor) ShowRef(commitlike string) (string, error) {
+	i.logger.Infof("Getting the commit sha for commitlike %s", commitlike)
+	out, err := i.executor.Run("show-ref", "-s", commitlike)
+	if err != nil {
+		return "", fmt.Errorf("failed to get commit sha for commitlike %s: %v", commitlike, err)
+	}
+	return strings.TrimSpace(string(out)), nil
 }

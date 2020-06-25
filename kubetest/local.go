@@ -215,7 +215,6 @@ func (n localCluster) TestSetup() error {
 func (n localCluster) Down() error {
 	processes := []string{
 		"cloud-controller-manager",
-		"hyperkube", // remove hyperkube when it is removed from local-up-cluster.sh
 		"kube-controller-manager",
 		"kube-proxy",
 		"kube-scheduler",
@@ -223,7 +222,7 @@ func (n localCluster) Down() error {
 		"kubelet",
 	}
 	// create docker client
-	cli, err := client.NewEnvClient()
+	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
 		log.Printf("Docker containers cleanup, unable to create Docker client: %v", err)
 	}

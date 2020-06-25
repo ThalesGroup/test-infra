@@ -19,21 +19,21 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"net/http"
 	"os"
 	"strconv"
 	"time"
 
 	"github.com/sirupsen/logrus"
-	"k8s.io/test-infra/prow/interrupts"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	"k8s.io/test-infra/pkg/flagutil"
-	"k8s.io/test-infra/pkg/io"
 	"k8s.io/test-infra/prow/config"
 	"k8s.io/test-infra/prow/config/secret"
 	prowflagutil "k8s.io/test-infra/prow/flagutil"
 	"k8s.io/test-infra/prow/git/v2"
+	"k8s.io/test-infra/prow/interrupts"
 	"k8s.io/test-infra/prow/logrusutil"
 	"k8s.io/test-infra/prow/metrics"
 	"k8s.io/test-infra/prow/pjutil"
@@ -49,23 +49,14 @@ type options struct {
 	syncThrottle   int
 	statusThrottle int
 
-	dryRun     bool
-	runOnce    bool
-	kubernetes prowflagutil.KubernetesOptions
-	github     prowflagutil.GitHubOptions
+	dryRun                 bool
+	runOnce                bool
+	kubernetes             prowflagutil.KubernetesOptions
+	github                 prowflagutil.GitHubOptions
+	storage                prowflagutil.StorageClientOptions
+	instrumentationOptions prowflagutil.InstrumentationOptions
 
 	maxRecordsPerPool int
-	// gcsCredentialsFile string is used for reading/writing to GCS block storage.
-	// If you want to write to local paths, this parameter is optional.
-	// If set, this file is used to read/write to gs:// paths
-	// If not, credential auto-discovery is used
-	gcsCredentialsFile string
-	// 	s3CredentialsFile string is used for reading/writing to s3 block storage.
-	// If you want to write to local paths, this parameter is optional.
-	// If set, this file is used to read/write to s3:// paths
-	// If not, go cloud credential auto-discovery is used
-	// For more details see the pkg/io/providers pkg.
-	s3CredentialsFile string
 	// historyURI where Tide should store its action history.
 	// Can be /local/path, gs://path/to/object or s3://path/to/object.
 	// GCS writes will use the bucket's default acl for new objects. Ensure both that
@@ -82,12 +73,11 @@ type options struct {
 }
 
 func (o *options) Validate() error {
-	for _, group := range []flagutil.OptionGroup{&o.kubernetes, &o.github} {
+	for idx, group := range []flagutil.OptionGroup{&o.kubernetes, &o.github, &o.storage} {
 		if err := group.Validate(o.dryRun); err != nil {
-			return err
+			return fmt.Errorf("%d: %w", idx, err)
 		}
 	}
-
 	return nil
 }
 
@@ -98,45 +88,34 @@ func gatherOptions(fs *flag.FlagSet, args ...string) options {
 	fs.StringVar(&o.jobConfigPath, "job-config-path", "", "Path to prow job configs.")
 	fs.BoolVar(&o.dryRun, "dry-run", true, "Whether to mutate any real-world state.")
 	fs.BoolVar(&o.runOnce, "run-once", false, "If true, run only once then quit.")
-	for _, group := range []flagutil.OptionGroup{&o.kubernetes, &o.github} {
+	for _, group := range []flagutil.OptionGroup{&o.kubernetes, &o.github, &o.storage, &o.instrumentationOptions} {
 		group.AddFlags(fs)
 	}
 	fs.IntVar(&o.syncThrottle, "sync-hourly-tokens", 800, "The maximum number of tokens per hour to be used by the sync controller.")
 	fs.IntVar(&o.statusThrottle, "status-hourly-tokens", 400, "The maximum number of tokens per hour to be used by the status controller.")
-
 	fs.IntVar(&o.maxRecordsPerPool, "max-records-per-pool", 1000, "The maximum number of history records stored for an individual Tide pool.")
-	fs.StringVar(&o.gcsCredentialsFile, "gcs-credentials-file", "", "File where GCS credentials are stored")
-	fs.StringVar(&o.s3CredentialsFile, "s3-credentials-file", "", "File where s3 credentials are stored. For the exact format see https://github.com/kubernetes/test-infra/blob/master/pkg/io/providers/providers.go")
 	fs.StringVar(&o.historyURI, "history-uri", "", "The /local/path,gs://path/to/object or s3://path/to/object to store tide action history. GCS writes will use the default object ACL for the bucket")
 	fs.StringVar(&o.statusURI, "status-path", "", "The /local/path, gs://path/to/object or s3://path/to/object to store status controller state. GCS writes will use the default object ACL for the bucket.")
 
 	fs.Parse(args)
-	o.configPath = config.ConfigPath(o.configPath)
 	return o
 }
 
 func main() {
-	logrusutil.ComponentInit("tide")
+	logrusutil.ComponentInit()
 
 	defer interrupts.WaitForGracefulShutdown()
-
-	pjutil.ServePProf()
 
 	o := gatherOptions(flag.NewFlagSet(os.Args[0], flag.ExitOnError), os.Args[1:]...)
 	if err := o.Validate(); err != nil {
 		logrus.WithError(err).Fatal("Invalid options")
 	}
 
-	opener, err := io.NewOpener(context.Background(), o.gcsCredentialsFile, o.s3CredentialsFile)
+	pjutil.ServePProf(o.instrumentationOptions.PProfPort)
+
+	opener, err := o.storage.StorageClient(context.Background())
 	if err != nil {
-		entry := logrus.WithError(err)
-		if p := o.gcsCredentialsFile; p != "" {
-			entry = entry.WithField("gcs-credentials-file", p)
-		}
-		if p := o.s3CredentialsFile; p != "" {
-			entry = entry.WithField("s3-credentials-file", p)
-		}
-		entry.Fatal("Cannot create opener")
+		logrus.WithError(err).Fatal("Cannot create opener")
 	}
 
 	configAgent := &config.Agent{}
@@ -210,7 +189,7 @@ func main() {
 	server := &http.Server{Addr: ":" + strconv.Itoa(o.port)}
 
 	// Push metrics to the configured prometheus pushgateway endpoint or serve them
-	metrics.ExposeMetrics("tide", cfg().PushGateway)
+	metrics.ExposeMetrics("tide", cfg().PushGateway, o.instrumentationOptions.MetricsPort)
 
 	start := time.Now()
 	sync(c)

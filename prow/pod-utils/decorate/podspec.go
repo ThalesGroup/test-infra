@@ -54,6 +54,8 @@ const (
 	toolsMountPath          = "/tools"
 	gcsCredentialsMountName = "gcs-credentials"
 	gcsCredentialsMountPath = "/secrets/gcs"
+	s3CredentialsMountName  = "s3-credentials"
+	s3CredentialsMountPath  = "/secrets/s3-storage"
 	outputMountName         = "output"
 	outputMountPath         = "/output"
 	oauthTokenFilename      = "oauth-token"
@@ -66,12 +68,12 @@ func Labels() []string {
 
 // VolumeMounts returns a string slice with *MountName consts in it.
 func VolumeMounts() []string {
-	return []string{logMountName, codeMountName, toolsMountName, gcsCredentialsMountName}
+	return []string{logMountName, codeMountName, toolsMountName, gcsCredentialsMountName, s3CredentialsMountName}
 }
 
 // VolumeMountPaths returns a string slice with *MountPath consts in it.
 func VolumeMountPaths() []string {
-	return []string{logMountPath, codeMountPath, toolsMountPath, gcsCredentialsMountPath}
+	return []string{logMountPath, codeMountPath, toolsMountPath, gcsCredentialsMountPath, s3CredentialsMountPath}
 }
 
 // LabelsAndAnnotationsForSpec returns a minimal set of labels to add to prowjobs or its owned resources.
@@ -188,6 +190,20 @@ func ProwJobToPodLocal(pj prowapi.ProwJob, buildID string, outputDir string) (*c
 		}
 	}
 
+	// If no termination policy is specified, use log fallback so the pod status
+	// contains a snippet of the failure, which is helpful when pods are cleaned up
+	// or evicted in failure modes. Callers can override by setting explicit policy.
+	for i, container := range spec.InitContainers {
+		if len(container.TerminationMessagePolicy) == 0 {
+			spec.InitContainers[i].TerminationMessagePolicy = coreapi.TerminationMessageFallbackToLogsOnError
+		}
+	}
+	for i, container := range spec.Containers {
+		if len(container.TerminationMessagePolicy) == 0 {
+			spec.Containers[i].TerminationMessagePolicy = coreapi.TerminationMessageFallbackToLogsOnError
+		}
+	}
+
 	podLabels, annotations := LabelsAndAnnotationsForJob(pj)
 	return &coreapi.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -243,9 +259,8 @@ func tmpVolume(name string) (coreapi.Volume, coreapi.VolumeMount) {
 }
 
 func oauthVolume(secret, key string) (coreapi.Volume, coreapi.VolumeMount) {
-	name := strings.Join([]string{"oauth-secret", secret}, "-")
 	return coreapi.Volume{
-			Name: name,
+			Name: secret,
 			VolumeSource: coreapi.VolumeSource{
 				Secret: &coreapi.SecretVolumeSource{
 					SecretName: secret,
@@ -256,7 +271,7 @@ func oauthVolume(secret, key string) (coreapi.Volume, coreapi.VolumeMount) {
 				},
 			},
 		}, coreapi.VolumeMount{
-			Name:      name,
+			Name:      secret,
 			MountPath: "/secrets/oauth",
 			ReadOnly:  true,
 		}
@@ -491,7 +506,7 @@ func PlaceEntrypoint(config *prowapi.DecorationConfig, toolsMount coreapi.Volume
 	return container
 }
 
-func GCSOptions(dc prowapi.DecorationConfig, localMode bool) (*coreapi.Volume, *coreapi.VolumeMount, gcsupload.Options) {
+func BlobStorageOptions(dc prowapi.DecorationConfig, localMode bool) ([]coreapi.Volume, []coreapi.VolumeMount, gcsupload.Options) {
 	opt := gcsupload.Options{
 		// TODO: pass the artifact dir here too once we figure that out
 		GCSConfiguration: dc.GCSConfiguration,
@@ -503,36 +518,53 @@ func GCSOptions(dc prowapi.DecorationConfig, localMode bool) (*coreapi.Volume, *
 		return nil, nil, opt
 	}
 
-	vol := &coreapi.Volume{
-		Name: gcsCredentialsMountName,
-		VolumeSource: coreapi.VolumeSource{
-			Secret: &coreapi.SecretVolumeSource{
-				SecretName: dc.GCSCredentialsSecret,
+	var volumes []coreapi.Volume
+	var mounts []coreapi.VolumeMount
+	if dc.GCSCredentialsSecret != "" {
+		volumes = append(volumes, coreapi.Volume{
+			Name: gcsCredentialsMountName,
+			VolumeSource: coreapi.VolumeSource{
+				Secret: &coreapi.SecretVolumeSource{
+					SecretName: dc.GCSCredentialsSecret,
+				},
 			},
-		},
+		})
+		mounts = append(mounts, coreapi.VolumeMount{
+			Name:      gcsCredentialsMountName,
+			MountPath: gcsCredentialsMountPath,
+		})
+		opt.StorageClientOptions.GCSCredentialsFile = fmt.Sprintf("%s/service-account.json", gcsCredentialsMountPath)
 	}
-	mount := &coreapi.VolumeMount{
-		Name:      vol.Name,
-		MountPath: gcsCredentialsMountPath,
+	if dc.S3CredentialsSecret != "" {
+		volumes = append(volumes, coreapi.Volume{
+			Name: s3CredentialsMountName,
+			VolumeSource: coreapi.VolumeSource{
+				Secret: &coreapi.SecretVolumeSource{
+					SecretName: dc.S3CredentialsSecret,
+				},
+			},
+		})
+		mounts = append(mounts, coreapi.VolumeMount{
+			Name:      s3CredentialsMountName,
+			MountPath: s3CredentialsMountPath,
+		})
+		opt.StorageClientOptions.S3CredentialsFile = fmt.Sprintf("%s/service-account.json", s3CredentialsMountPath)
 	}
-	opt.GcsCredentialsFile = fmt.Sprintf("%s/service-account.json", mount.MountPath)
 
-	return vol, mount, opt
+	return volumes, mounts, opt
 }
 
-func InitUpload(config *prowapi.DecorationConfig, opt gcsupload.Options, creds *coreapi.VolumeMount, cloneLogMount *coreapi.VolumeMount, outputMount *coreapi.VolumeMount, encodedJobSpec string) (*coreapi.Container, error) {
+func InitUpload(config *prowapi.DecorationConfig, gcsOptions gcsupload.Options, blobStorageMounts []coreapi.VolumeMount, cloneLogMount *coreapi.VolumeMount, outputMount *coreapi.VolumeMount, encodedJobSpec string) (*coreapi.Container, error) {
 	// TODO(fejta): remove encodedJobSpec
 	initUploadOptions := initupload.Options{
-		Options: &opt,
+		Options: &gcsOptions,
 	}
 	var mounts []coreapi.VolumeMount
 	if cloneLogMount != nil {
 		initUploadOptions.Log = CloneLogPath(*cloneLogMount)
 		mounts = append(mounts, *cloneLogMount)
 	}
-	if creds != nil {
-		mounts = append(mounts, *creds)
-	}
+	mounts = append(mounts, blobStorageMounts...)
 	if outputMount != nil {
 		mounts = append(mounts, *outputMount)
 	}
@@ -615,7 +647,7 @@ func decorate(spec *coreapi.PodSpec, pj *prowapi.ProwJob, rawEnv map[string]stri
 		}
 	}
 
-	gcsVol, gcsMount, gcsOptions := GCSOptions(*pj.Spec.DecorationConfig, localMode)
+	blobStorageVolumes, blobStorageMounts, blobStorageOptions := BlobStorageOptions(*pj.Spec.DecorationConfig, localMode)
 
 	cloner, refs, cloneVolumes, err := CloneRefs(*pj, codeMount, logMount)
 	if err != nil {
@@ -628,7 +660,7 @@ func decorate(spec *coreapi.PodSpec, pj *prowapi.ProwJob, rawEnv map[string]stri
 	}
 
 	encodedJobSpec := rawEnv[downwardapi.JobSpecEnv]
-	initUpload, err := InitUpload(pj.Spec.DecorationConfig, gcsOptions, gcsMount, cloneLogMount, outputMount, encodedJobSpec)
+	initUpload, err := InitUpload(pj.Spec.DecorationConfig, blobStorageOptions, blobStorageMounts, cloneLogMount, outputMount, encodedJobSpec)
 	if err != nil {
 		return fmt.Errorf("create initupload container: %v", err)
 	}
@@ -637,7 +669,6 @@ func decorate(spec *coreapi.PodSpec, pj *prowapi.ProwJob, rawEnv map[string]stri
 		*initUpload,
 		PlaceEntrypoint(pj.Spec.DecorationConfig, toolsMount),
 	)
-
 	spec.Containers[0].Env = append(spec.Containers[0].Env, KubeEnv(rawEnv)...)
 
 	const ( // these values may change when/if we support multiple containers
@@ -650,16 +681,15 @@ func decorate(spec *coreapi.PodSpec, pj *prowapi.ProwJob, rawEnv map[string]stri
 		return fmt.Errorf("wrap container: %v", err)
 	}
 
-	sidecar, err := Sidecar(pj.Spec.DecorationConfig, gcsOptions, gcsMount, logMount, outputMount, encodedJobSpec, !RequirePassingEntries, *wrapperOptions)
+	sidecar, err := Sidecar(pj.Spec.DecorationConfig, blobStorageOptions, blobStorageMounts, logMount, outputMount, encodedJobSpec, !RequirePassingEntries, *wrapperOptions)
 	if err != nil {
 		return fmt.Errorf("create sidecar: %v", err)
 	}
 
 	spec.Containers = append(spec.Containers, *sidecar)
+
 	spec.Volumes = append(spec.Volumes, logVolume, toolsVolume)
-	if gcsVol != nil {
-		spec.Volumes = append(spec.Volumes, *gcsVol)
-	}
+	spec.Volumes = append(spec.Volumes, blobStorageVolumes...)
 	if outputVolume != nil {
 		spec.Volumes = append(spec.Volumes, *outputVolume)
 	}
@@ -693,7 +723,7 @@ const (
 	RequirePassingEntries = true
 )
 
-func Sidecar(config *prowapi.DecorationConfig, gcsOptions gcsupload.Options, gcsMount *coreapi.VolumeMount, logMount coreapi.VolumeMount, outputMount *coreapi.VolumeMount, encodedJobSpec string, requirePassingEntries bool, wrappers ...wrapper.Options) (*coreapi.Container, error) {
+func Sidecar(config *prowapi.DecorationConfig, gcsOptions gcsupload.Options, blobStorageMounts []coreapi.VolumeMount, logMount coreapi.VolumeMount, outputMount *coreapi.VolumeMount, encodedJobSpec string, requirePassingEntries bool, wrappers ...wrapper.Options) (*coreapi.Container, error) {
 	gcsOptions.Items = append(gcsOptions.Items, artifactsDir(logMount))
 	sidecarConfigEnv, err := sidecar.Encode(sidecar.Options{
 		GcsOptions: &gcsOptions,
@@ -704,9 +734,7 @@ func Sidecar(config *prowapi.DecorationConfig, gcsOptions gcsupload.Options, gcs
 		return nil, err
 	}
 	mounts := []coreapi.VolumeMount{logMount}
-	if gcsMount != nil {
-		mounts = append(mounts, *gcsMount)
-	}
+	mounts = append(mounts, blobStorageMounts...)
 	if outputMount != nil {
 		mounts = append(mounts, *outputMount)
 	}

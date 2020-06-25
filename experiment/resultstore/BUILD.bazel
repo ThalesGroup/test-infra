@@ -1,7 +1,12 @@
 load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
 load("//prow:def.bzl", "prow_image", "prow_push")
 
-prow_image(name = "image")
+NAME = "resultstore"
+
+prow_image(
+    name = "image",
+    component = NAME,
+)
 
 prow_push(
     name = "push",
@@ -23,6 +28,7 @@ go_library(
     importpath = "k8s.io/test-infra/experiment/resultstore",
     visibility = ["//visibility:private"],
     deps = [
+        "//prow/apis/prowjobs/v1:go_default_library",
         "//prow/flagutil:go_default_library",
         "//prow/logrusutil:go_default_library",
         "@com_github_googlecloudplatform_testgrid//config:go_default_library",
@@ -37,7 +43,7 @@ go_library(
 )
 
 go_binary(
-    name = "resultstore",
+    name = NAME,
     embed = [":go_default_library"],
     visibility = ["//visibility:public"],
 )

@@ -31,7 +31,7 @@ Assuming your prow components have multiple replicas, this will result in no dow
 
 Update your deployment (optionally build/pushing the image) to a new image with:
 ```shell
-# export PROW_REPO_OVERRIDE=gcr.io/k8s-prow  # optionally override project
+# export PROW_REPO_OVERRIDE=gcr.io/k8s-prow  # optionally change k8s-prow to your project
 push.sh  # Build and push the current repo state.
 bump.sh --list  # Choose a recent published version
 bump.sh v20181002-deadbeef # Use a specific version
@@ -45,15 +45,15 @@ export PROW_CLUSTER_OVERRIDE=my-k8s-cluster-context # or whatever the correct va
 export BUILD_CLUSTER_OVERRIDE=my-k8s-job-cluster-context # or whatever the correct value is
 
 # Generally just do
-bazel run //prow/cluster:production.apply # deploy everything
+bazel run //config/prow/cluster:production.apply # deploy everything
 
 # In case of an emergency hook update
-bazel run //prow/cluster:hook.apply # just update hook
+bazel run //config/prow/cluster:hook.apply # just update hook
 
 # This is equivalent to doing the following with kubectl directly:
 kubectl config use-context my-k8s-cluster-context
-kubectl apply -f prow/cluster/*.yaml
-kubectl apply -f prow/cluster/hook_deployment.yaml
+kubectl apply -f config/prow/cluster/*.yaml
+kubectl apply -f config/prow/cluster/hook_deployment.yaml
 ```
 
 ## How to test a ProwJob

@@ -58,6 +58,7 @@ var (
 		github.PullRequestActionReopened:             true,
 		github.PullRequestActionSynchronize:          true,
 		github.PullRequestActionReadyForReview:       true,
+		github.PullRequestConvertedToDraft:           true,
 	}
 )
 
@@ -76,7 +77,7 @@ func (s *Server) handleReviewEvent(l *logrus.Entry, re github.ReviewEvent) {
 		s.wg.Add(1)
 		go func(p string, h plugins.ReviewEventHandler) {
 			defer s.wg.Done()
-			agent := plugins.NewAgent(s.ConfigAgent, s.Plugins, s.ClientAgent, s.Metrics.Metrics, l.WithField("plugin", p))
+			agent := plugins.NewAgent(s.ConfigAgent, s.Plugins, s.ClientAgent, s.Metrics.Metrics, l, p)
 			agent.InitializeCommentPruner(
 				re.Repo.Owner.Login,
 				re.Repo.Name,
@@ -131,7 +132,7 @@ func (s *Server) handleReviewCommentEvent(l *logrus.Entry, rce github.ReviewComm
 		s.wg.Add(1)
 		go func(p string, h plugins.ReviewCommentEventHandler) {
 			defer s.wg.Done()
-			agent := plugins.NewAgent(s.ConfigAgent, s.Plugins, s.ClientAgent, s.Metrics.Metrics, l.WithField("plugin", p))
+			agent := plugins.NewAgent(s.ConfigAgent, s.Plugins, s.ClientAgent, s.Metrics.Metrics, l, p)
 			agent.InitializeCommentPruner(
 				rce.Repo.Owner.Login,
 				rce.Repo.Name,
@@ -185,7 +186,7 @@ func (s *Server) handlePullRequestEvent(l *logrus.Entry, pr github.PullRequestEv
 		s.wg.Add(1)
 		go func(p string, h plugins.PullRequestHandler) {
 			defer s.wg.Done()
-			agent := plugins.NewAgent(s.ConfigAgent, s.Plugins, s.ClientAgent, s.Metrics.Metrics, l.WithField("plugin", p))
+			agent := plugins.NewAgent(s.ConfigAgent, s.Plugins, s.ClientAgent, s.Metrics.Metrics, l, p)
 			agent.InitializeCommentPruner(
 				pr.Repo.Owner.Login,
 				pr.Repo.Name,
@@ -241,7 +242,7 @@ func (s *Server) handlePushEvent(l *logrus.Entry, pe github.PushEvent) {
 		s.wg.Add(1)
 		go func(p string, h plugins.PushEventHandler) {
 			defer s.wg.Done()
-			agent := plugins.NewAgent(s.ConfigAgent, s.Plugins, s.ClientAgent, s.Metrics.Metrics, l.WithField("plugin", p))
+			agent := plugins.NewAgent(s.ConfigAgent, s.Plugins, s.ClientAgent, s.Metrics.Metrics, l, p)
 			start := time.Now()
 			labels := prometheus.Labels{"event_type": l.Data[eventTypeField].(string), "action": "none", "plugin": p}
 			if err := h(agent, pe); err != nil {
@@ -267,7 +268,7 @@ func (s *Server) handleIssueEvent(l *logrus.Entry, i github.IssueEvent) {
 		s.wg.Add(1)
 		go func(p string, h plugins.IssueHandler) {
 			defer s.wg.Done()
-			agent := plugins.NewAgent(s.ConfigAgent, s.Plugins, s.ClientAgent, s.Metrics.Metrics, l.WithField("plugin", p))
+			agent := plugins.NewAgent(s.ConfigAgent, s.Plugins, s.ClientAgent, s.Metrics.Metrics, l, p)
 			agent.InitializeCommentPruner(
 				i.Repo.Owner.Login,
 				i.Repo.Name,
@@ -324,7 +325,7 @@ func (s *Server) handleIssueCommentEvent(l *logrus.Entry, ic github.IssueComment
 		s.wg.Add(1)
 		go func(p string, h plugins.IssueCommentHandler) {
 			defer s.wg.Done()
-			agent := plugins.NewAgent(s.ConfigAgent, s.Plugins, s.ClientAgent, s.Metrics.Metrics, l.WithField("plugin", p))
+			agent := plugins.NewAgent(s.ConfigAgent, s.Plugins, s.ClientAgent, s.Metrics.Metrics, l, p)
 			agent.InitializeCommentPruner(
 				ic.Repo.Owner.Login,
 				ic.Repo.Name,
@@ -380,7 +381,7 @@ func (s *Server) handleStatusEvent(l *logrus.Entry, se github.StatusEvent) {
 		s.wg.Add(1)
 		go func(p string, h plugins.StatusEventHandler) {
 			defer s.wg.Done()
-			agent := plugins.NewAgent(s.ConfigAgent, s.Plugins, s.ClientAgent, s.Metrics.Metrics, l.WithField("plugin", p))
+			agent := plugins.NewAgent(s.ConfigAgent, s.Plugins, s.ClientAgent, s.Metrics.Metrics, l, p)
 			start := time.Now()
 			labels := prometheus.Labels{"event_type": l.Data[eventTypeField].(string), "action": "none", "plugin": p}
 			if err := h(agent, se); err != nil {
@@ -412,7 +413,7 @@ func (s *Server) handleGenericComment(l *logrus.Entry, ce *github.GenericComment
 		s.wg.Add(1)
 		go func(p string, h plugins.GenericCommentHandler) {
 			defer s.wg.Done()
-			agent := plugins.NewAgent(s.ConfigAgent, s.Plugins, s.ClientAgent, s.Metrics.Metrics, l.WithField("plugin", p))
+			agent := plugins.NewAgent(s.ConfigAgent, s.Plugins, s.ClientAgent, s.Metrics.Metrics, l, p)
 			agent.InitializeCommentPruner(
 				ce.Repo.Owner.Login,
 				ce.Repo.Name,

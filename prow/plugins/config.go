@@ -30,8 +30,9 @@ import (
 
 	"k8s.io/apimachinery/pkg/util/sets"
 
+	utilerrors "k8s.io/apimachinery/pkg/util/errors"
+
 	"k8s.io/test-infra/prow/bugzilla"
-	"k8s.io/test-infra/prow/errorutil"
 	"k8s.io/test-infra/prow/kube"
 	"k8s.io/test-infra/prow/labels"
 )
@@ -114,15 +115,10 @@ type ExternalPlugin struct {
 type Blunderbuss struct {
 	// ReviewerCount is the minimum number of reviewers to request
 	// reviews from. Defaults to requesting reviews from 2 reviewers
-	// if FileWeightCount is not set.
 	ReviewerCount *int `json:"request_count,omitempty"`
 	// MaxReviewerCount is the maximum number of reviewers to request
 	// reviews from. Defaults to 0 meaning no limit.
 	MaxReviewerCount int `json:"max_request_count,omitempty"`
-	// FileWeightCount is the maximum number of reviewers to request
-	// reviews from. Selects reviewers based on file weighting.
-	// This and request_count are mutually exclusive options.
-	FileWeightCount *int `json:"file_weight_count,omitempty"`
 	// ExcludeApprovers controls whether approvers are considered to be
 	// reviewers. By default, approvers are considered as reviewers if
 	// insufficient reviewers are available. If ExcludeApprovers is true,
@@ -273,11 +269,17 @@ type Approve struct {
 	// * an APPROVE github review is equivalent to leaving an "/approve" message.
 	// * A REQUEST_CHANGES github review is equivalent to leaving an /approve cancel" message.
 	IgnoreReviewState *bool `json:"ignore_review_state,omitempty"`
+
+	// CommandHelpLink is the link to the help page which shows the available commands for each repo.
+	// The default value is "https://go.k8s.io/bot-commands". The command help page is served by Deck
+	// and available under https://<deck-url>/command-help, e.g. "https://prow.k8s.io/command-help"
+	CommandHelpLink string `json:"commandHelpLink"`
 }
 
 var (
-	warnImplicitSelfApprove time.Time
-	warnReviewActsAsApprove time.Time
+	warnImplicitSelfApprove       time.Time
+	warnReviewActsAsApprove       time.Time
+	warnDependentBugTargetRelease time.Time
 )
 
 func (a Approve) HasSelfApproval() bool {
@@ -360,10 +362,6 @@ type Trigger struct {
 	// IgnoreOkToTest makes trigger ignore /ok-to-test comments.
 	// This is a security mitigation to only allow testing from trusted users.
 	IgnoreOkToTest bool `json:"ignore_ok_to_test,omitempty"`
-	// ElideSkippedContexts makes trigger not post "Skipped" contexts for jobs
-	// that could run but do not run. Defaults to true.
-	// THIS FIELD IS DEPRECATED AND WILL BE REMOVED AFTER OCTOBER 2019.
-	ElideSkippedContexts *bool `json:"elide_skipped_contexts,omitempty"`
 }
 
 // Heart contains the configuration for the heart plugin.
@@ -749,16 +747,7 @@ func (c *Configuration) TriggerFor(org, repo string) Trigger {
 	return tr
 }
 
-var warnElideSkippedContexts time.Time
-
 func (t *Trigger) SetDefaults() {
-	truth := true
-	if t.ElideSkippedContexts == nil {
-		t.ElideSkippedContexts = &truth
-	} else {
-		warnDeprecated(&warnElideSkippedContexts, 5*time.Minute, "elide_skipped_contexts is deprecated and will be removed after Oct. 2019. Skipped contexts are now elided by default.")
-	}
-
 	if t.TrustedOrg != "" && t.JoinOrgURL == "" {
 		t.JoinOrgURL = fmt.Sprintf("https://github.com/orgs/%s/people", t.TrustedOrg)
 	}
@@ -861,7 +850,7 @@ func (c *Configuration) setDefaults() {
 			c.ExternalPlugins[repo][i].Endpoint = fmt.Sprintf("http://%s", p.Name)
 		}
 	}
-	if c.Blunderbuss.ReviewerCount == nil && c.Blunderbuss.FileWeightCount == nil {
+	if c.Blunderbuss.ReviewerCount == nil {
 		c.Blunderbuss.ReviewerCount = new(int)
 		*c.Blunderbuss.ReviewerCount = defaultBlunderbussReviewerCount
 	}
@@ -906,7 +895,7 @@ func validatePluginsDupes(plugins map[string][]string) error {
 			}
 		}
 	}
-	return errorutil.NewAggregate(errors...)
+	return utilerrors.NewAggregate(errors)
 }
 
 // ValidatePluginsUnknown will return an error if there are any unrecognized
@@ -920,7 +909,7 @@ func (c *Configuration) ValidatePluginsUnknown() error {
 			}
 		}
 	}
-	return errorutil.NewAggregate(errors...)
+	return utilerrors.NewAggregate(errors)
 }
 
 func validateSizes(size Size) error {
@@ -974,20 +963,9 @@ func validateExternalPlugins(pluginMap map[string][]ExternalPlugin) error {
 	return nil
 }
 
-var warnBlunderbussFileWeightCount time.Time
-
 func validateBlunderbuss(b *Blunderbuss) error {
-	if b.ReviewerCount != nil && b.FileWeightCount != nil {
-		return errors.New("cannot use both request_count and file_weight_count in blunderbuss")
-	}
 	if b.ReviewerCount != nil && *b.ReviewerCount < 1 {
 		return fmt.Errorf("invalid request_count: %v (needs to be positive)", *b.ReviewerCount)
-	}
-	if b.FileWeightCount != nil && *b.FileWeightCount < 1 {
-		return fmt.Errorf("invalid file_weight_count: %v (needs to be positive)", *b.FileWeightCount)
-	}
-	if b.FileWeightCount != nil {
-		warnDeprecated(&warnBlunderbussFileWeightCount, 5*time.Minute, "file_weight_count is being deprecated in favour of max_request_count. Please ensure your configuration is updated before the end of May 2019.")
 	}
 	return nil
 }
@@ -1123,6 +1101,14 @@ func compileRegexpsAndDurations(pc *Configuration) error {
 		rs[i].GracePeriodDuration = dur
 	}
 	return nil
+}
+
+func (c *Configuration) ApplyDefaults() {
+	for _, a := range c.Approve {
+		if a.CommandHelpLink == "" {
+			a.CommandHelpLink = "https://go.k8s.io/bot-commands"
+		}
+	}
 }
 
 func (c *Configuration) Validate() error {
@@ -1314,10 +1300,18 @@ type BugzillaBranchOptions struct {
 	// DependentBugStates determine states in which a bug's dependents bugs may be
 	// to deem the child bug valid.  If set, all blockers must have a valid state.
 	DependentBugStates *[]BugzillaBugState `json:"dependent_bug_states,omitempty"`
-	// DependentBugTargetRelease determines which release a bug's dependent bugs
-	// need to target to be valid.  If set, all blockers must have a valid target
-	// releasee.
-	DependentBugTargetRelease *string `json:"dependent_bug_target_release,omitempty"`
+	// DependentBugTargetReleases determines the set of valid target
+	// releases for dependent bugs.  If set, all blockers must have a
+	// valid target release.
+	DependentBugTargetReleases *[]string `json:"dependent_bug_target_releases,omitempty"`
+	// DeprecatedDependentBugTargetRelease determines which release a
+	// bug's dependent bugs need to target to be valid.  If set, all
+	// blockers must have a valid target releasee.
+	//
+	// Deprecated: Use DependentBugTargetReleases instead.  If set,
+	// DependentBugTargetRelease will be appended to
+	// DeprecatedDependentBugTargetReleases.
+	DeprecatedDependentBugTargetRelease *string `json:"dependent_bug_target_release,omitempty"`
 
 	// StatusAfterValidation is the status which the bug will be moved to after being
 	// deemed valid and linked to a PR. Will implicitly be considered a part of `statuses`
@@ -1464,8 +1458,17 @@ func ResolveBugzillaOptions(parent, child BugzillaBranchOptions) BugzillaBranchO
 			output.DependentBugStatuses = parent.DependentBugStatuses
 			output.DependentBugStates = mergeStatusesIntoStates(output.DependentBugStates, parent.DependentBugStatuses)
 		}
-		if parent.DependentBugTargetRelease != nil {
-			output.DependentBugTargetRelease = parent.DependentBugTargetRelease
+		if parent.DependentBugTargetReleases != nil {
+			output.DependentBugTargetReleases = parent.DependentBugTargetReleases
+		}
+		if parent.DeprecatedDependentBugTargetRelease != nil {
+			warnDeprecated(&warnDependentBugTargetRelease, 5*time.Minute, "Please update plugins.yaml to use dependent_bug_target_releases instead of the deprecated dependent_bug_target_release")
+			if parent.DependentBugTargetReleases == nil {
+				output.DependentBugTargetReleases = &[]string{*parent.DeprecatedDependentBugTargetRelease}
+			} else if !sets.NewString(*parent.DependentBugTargetReleases...).Has(*parent.DeprecatedDependentBugTargetRelease) {
+				dependentBugTargetReleases := append(*output.DependentBugTargetReleases, *parent.DeprecatedDependentBugTargetRelease)
+				output.DependentBugTargetReleases = &dependentBugTargetReleases
+			}
 		}
 		if parent.StatusAfterValidation != nil {
 			output.StatusAfterValidation = parent.StatusAfterValidation
@@ -1518,8 +1521,17 @@ func ResolveBugzillaOptions(parent, child BugzillaBranchOptions) BugzillaBranchO
 		}
 		output.DependentBugStates = mergeStatusesIntoStates(output.DependentBugStates, child.DependentBugStatuses)
 	}
-	if child.DependentBugTargetRelease != nil {
-		output.DependentBugTargetRelease = child.DependentBugTargetRelease
+	if child.DependentBugTargetReleases != nil {
+		output.DependentBugTargetReleases = child.DependentBugTargetReleases
+	}
+	if child.DeprecatedDependentBugTargetRelease != nil {
+		warnDeprecated(&warnDependentBugTargetRelease, 5*time.Minute, "Please update plugins.yaml to use dependent_bug_target_releases instead of the deprecated dependent_bug_target_release")
+		if child.DependentBugTargetReleases == nil {
+			output.DependentBugTargetReleases = &[]string{*child.DeprecatedDependentBugTargetRelease}
+		} else if !sets.NewString(*child.DependentBugTargetReleases...).Has(*child.DeprecatedDependentBugTargetRelease) {
+			dependentBugTargetReleases := append(*output.DependentBugTargetReleases, *child.DeprecatedDependentBugTargetRelease)
+			output.DependentBugTargetReleases = &dependentBugTargetReleases
+		}
 	}
 	if child.StatusAfterValidation != nil {
 		output.StatusAfterValidation = child.StatusAfterValidation

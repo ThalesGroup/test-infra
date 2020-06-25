@@ -9,11 +9,11 @@ approvers:
 - justaugustus
 - karataliu
 - khenidak
-- soggiest
 reviewers:
+- alexeldeib
+- devigned
 - juan-lee
-- serbrech
-- vincepri
+- nader-ziada
 
 labels:
 - sig/cluster-lifecycle

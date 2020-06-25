@@ -151,6 +151,8 @@ dashboards:
   dashboard_tab:
   - name: ci-daisy-e2e
     test_group_name: ci-daisy-e2e
+    alert_options:
+      alert_mail_to_addresses: gcedaisy+alerts@google.com    
     file_bug_template:
       url: https://github.com/GoogleCloudPlatform/compute-image-tools/issues/new
       options:
@@ -160,6 +162,8 @@ dashboards:
         value: <test-url>
   - name: ci-daisy-e2e-daily
     test_group_name: ci-daisy-e2e-daily
+    alert_options:
+      alert_mail_to_addresses: gcedaisy+alerts@google.com       
     file_bug_template:
       url: https://github.com/GoogleCloudPlatform/compute-image-tools/issues/new
       options:
@@ -169,6 +173,8 @@ dashboards:
         value: <test-url>
   - name: ci-daisy-e2e-weekly
     test_group_name: ci-daisy-e2e-weekly
+    alert_options:
+      alert_mail_to_addresses: gcedaisy+alerts@google.com   
     file_bug_template:
       url: https://github.com/GoogleCloudPlatform/compute-image-tools/issues/new
       options:
@@ -178,6 +184,8 @@ dashboards:
         value: <test-url>
   - name: ci-images-import-export-cli-e2e-tests
     test_group_name: ci-images-import-export-cli-e2e-tests
+    alert_options:
+      alert_mail_to_addresses: gcedaisy+alerts@google.com   
     file_bug_template:
       url: https://github.com/GoogleCloudPlatform/compute-image-tools/issues/new
       options:
@@ -187,11 +195,22 @@ dashboards:
         value: <test-url>
   - name: ci-ovf-import-e2e-tests-daily
     test_group_name: ci-ovf-import-e2e-tests-daily
+    alert_options:
+      alert_mail_to_addresses: gcedaisy+alerts@google.com
     file_bug_template:
       url: https://github.com/GoogleCloudPlatform/compute-image-tools/issues/new
       options:
       - key: title
         value: 'ci-ovf-import-e2e-tests-daily issue: <test-name>'
+      - key: body
+        value: <test-url>
+  - name: ci-windows-upgrade-e2e-tests
+    test_group_name: ci-windows-upgrade-e2e-tests
+    file_bug_template:
+      url: https://github.com/GoogleCloudPlatform/compute-image-tools/issues/new
+      options:
+      - key: title
+        value: 'ci-windows-upgrade-e2e-tests issue: <test-name>'
       - key: body
         value: <test-url>
   - name: linux-image-tests
@@ -212,6 +231,13 @@ dashboards:
         value: 'windows-image-tests issue: <test-name>'
       - key: body
         value: <test-url>
+
+- name: google-kops-gce
+- name: google-gci
+- name: google-gke
+- name: google-gce-upgrade
+- name: google-osconfig
+  dashboard_tab:
   - name: osconfig-unstable
     test_group_name: osconfig-unstable
     file_bug_template:
@@ -239,46 +265,15 @@ dashboards:
         value: 'osconfig-stable issue: <test-name>'
       - key: body
         value: <test-url>
-
-- name: google-kops-gce
-- name: google-gci
-- name: google-gke
-  dashboard_tab:
-  - name: gke-cos-k8sstable3-ingress
-    test_group_name: ci-kubernetes-e2e-gke-cos-k8sstable3-ingress
-  - name: gke-cos-k8sstable3-reboot
-    test_group_name: ci-kubernetes-e2e-gke-cos-k8sstable3-reboot
-  - name: gke-cos-k8sstable3-default
-    test_group_name: ci-kubernetes-e2e-gke-cos-k8sstable3-default
-  - name: gke-cos-k8sstable3-serial
-    test_group_name: ci-kubernetes-e2e-gke-cos-k8sstable3-serial
-  - name: gke-cos-k8sstable3-slow
-    test_group_name: ci-kubernetes-e2e-gke-cos-k8sstable3-slow
-  # K8S stable2 branch on GKE
-  - name: gke-cos-k8sstable2-ingress
-    test_group_name: ci-kubernetes-e2e-gke-cos-k8sstable2-ingress
-  - name: gke-cos-k8sstable2-reboot
-    test_group_name: ci-kubernetes-e2e-gke-cos-k8sstable2-reboot
-  - name: gke-cos-k8sstable2-default
-    test_group_name: ci-kubernetes-e2e-gke-cos-k8sstable2-default
-  - name: gke-cos-k8sstable2-serial
-    test_group_name: ci-kubernetes-e2e-gke-cos-k8sstable2-serial
-  - name: gke-cos-k8sstable2-slow
-    test_group_name: ci-kubernetes-e2e-gke-cos-k8sstable2-slow
-  # K8S stable1 branch on GKE
-  - name: gke-cos-k8sstable1-ingress
-    test_group_name: ci-kubernetes-e2e-gke-cos-k8sstable1-ingress
-  - name: gke-cos-k8sstable1-reboot
-    test_group_name: ci-kubernetes-e2e-gke-cos-k8sstable1-reboot
-  - name: gke-cos-k8sstable1-default
-    test_group_name: ci-kubernetes-e2e-gke-cos-k8sstable1-default
-  - name: gke-cos-k8sstable1-serial
-    test_group_name: ci-kubernetes-e2e-gke-cos-k8sstable1-serial
-  - name: gke-cos-k8sstable1-slow
-    test_group_name: ci-kubernetes-e2e-gke-cos-k8sstable1-slow
-- name: google-gke-stackdriver
-- name: google-gke-upgrade
-- name: google-gce-upgrade
+  - name: osconfig-head-images
+    test_group_name: osconfig-head-images
+    file_bug_template:
+      url: https://github.com/GoogleCloudPlatform/osconfig/issues/new
+      options:
+      - key: title
+        value: 'osconfig-head-images issue: <test-name>'
+      - key: body
+        value: <test-url>
 - name: google-soak
 - name: google-unit
 - name: google-windows
@@ -297,46 +292,6 @@ dashboards:
       alert_mail_to_addresses: gke-kubernetes-accelerators-bugs@google.com
   - name: gce-device-plugin-gpu-stable1
     test_group_name: ci-kubernetes-e2e-gce-device-plugin-gpu-stable1
-    base_options: exclude-filter-by-regex=^BeforeSuite$
-    alert_options:
-      alert_mail_to_addresses: gke-kubernetes-accelerators-bugs@google.com
-  - name: gke-device-plugin-gpu
-    test_group_name: ci-kubernetes-e2e-gke-device-plugin-gpu
-    base_options: exclude-filter-by-regex=^BeforeSuite$
-    alert_options:
-      alert_mail_to_addresses: gke-kubernetes-accelerators-bugs@google.com
-  - name: gke-device-plugin-gpu-beta
-    test_group_name: ci-kubernetes-e2e-gke-device-plugin-gpu-beta
-    base_options: exclude-filter-by-regex=^BeforeSuite$
-    alert_options:
-      alert_mail_to_addresses: gke-kubernetes-accelerators-bugs@google.com
-  - name: gke-device-plugin-gpu-stable1
-    test_group_name: ci-kubernetes-e2e-gke-device-plugin-gpu-stable1
-    base_options: exclude-filter-by-regex=^BeforeSuite$
-    alert_options:
-      alert_mail_to_addresses: gke-kubernetes-accelerators-bugs@google.com
-  - name: gke-device-plugin-gpu-p100
-    test_group_name: ci-kubernetes-e2e-gke-device-plugin-gpu-p100
-    base_options: exclude-filter-by-regex=^BeforeSuite$
-    alert_options:
-      alert_mail_to_addresses: gke-kubernetes-accelerators-bugs@google.com
-  - name: gke-device-plugin-gpu-p100-beta
-    test_group_name: ci-kubernetes-e2e-gke-device-plugin-gpu-p100-beta
-    base_options: exclude-filter-by-regex=^BeforeSuite$
-    alert_options:
-      alert_mail_to_addresses: gke-kubernetes-accelerators-bugs@google.com
-  - name: gke-device-plugin-gpu-p100-stable1
-    test_group_name: ci-kubernetes-e2e-gke-device-plugin-gpu-p100-stable1
-    base_options: exclude-filter-by-regex=^BeforeSuite$
-    alert_options:
-      alert_mail_to_addresses: gke-kubernetes-accelerators-bugs@google.com
-  - name: gke-device-plugin-gpu-monitoring
-    test_group_name: ci-kubernetes-e2e-gke-device-plugin-gpu-monitoring
-    base_options: exclude-filter-by-regex=^BeforeSuite$
-    alert_options:
-      alert_mail_to_addresses: gke-kubernetes-accelerators-bugs@google.com
-  - name: gke-device-plugin-gpu-ubuntu
-    test_group_name: ci-kubernetes-e2e-gke-device-plugin-gpu-ubuntu
     base_options: exclude-filter-by-regex=^BeforeSuite$
     alert_options:
       alert_mail_to_addresses: gke-kubernetes-accelerators-bugs@google.com
@@ -394,21 +349,6 @@ dashboards:
     base_options: include-filter-by-regex=sig-auth
     description: apps gce serial e2e tests for master branch
 
-- name: sig-auth-gke
-  dashboard_tab:
-  - name: gke
-    test_group_name: ci-kubernetes-e2e-gci-gke
-    base_options: include-filter-by-regex=sig-auth
-    description: apps gke e2e tests for master branch
-  - name: gke-slow
-    test_group_name: ci-kubernetes-e2e-gci-gke-slow
-    base_options: include-filter-by-regex=sig-auth
-    description: apps gke slow e2e tests for master branch
-  - name: gke-serial
-    test_group_name: ci-kubernetes-e2e-gci-gke-serial
-    base_options: include-filter-by-regex=sig-auth
-    description: apps gke serial e2e tests for master branch
-
 - name: sig-big-data
 - name: presubmits-cloud-provider-alibaba
 - name: presubmits-alibaba-cloud-csi-driver
@@ -448,6 +388,9 @@ dashboards:
     base_options: width=10
   - name: pull-kubernetes-typecheck
     test_group_name: pull-kubernetes-typecheck
+    base_options: width=10
+  - name: pull-kubernetes-files-remake
+    test_group_name: pull-kubernetes-files-remake
     base_options: width=10
   - name: pull-kubernetes-dependencies
     test_group_name: pull-kubernetes-dependencies
@@ -502,12 +445,6 @@ dashboards:
   - name: pull-kubernetes-e2e-gce-device-plugin-gpu
     test_group_name: pull-kubernetes-e2e-gce-device-plugin-gpu
     base_options: width=10
-  - name: pull-kubernetes-e2e-gke-device-plugin-gpu
-    test_group_name: pull-kubernetes-e2e-gke-device-plugin-gpu
-    base_options: width=10
-  - name: pull-kubernetes-e2e-gke
-    test_group_name: pull-kubernetes-e2e-gke
-    base_options: width=10
   - name: pull-kubernetes-node-e2e-alpha
     test_group_name: pull-kubernetes-node-e2e-alpha
     base_options: width=10
@@ -552,6 +489,9 @@ dashboards:
     base_options: width=10
   - name: pull-perf-tests-clusterloader2
     test_group_name: pull-perf-tests-clusterloader2
+    base_options: width=10
+  - name: pull-perf-tests-clusterloader2-nodekiller-experimental
+    test_group_name: pull-perf-tests-clusterloader2-nodekiller-experimental
     base_options: width=10
   - name: pull-perf-tests-clusterloader2-kubemark
     test_group_name: pull-perf-tests-clusterloader2-kubemark
@@ -623,10 +563,9 @@ dashboard_groups:
   - google-gcp-guest
   - google-gci
   - google-gke
-  - google-gke-stackdriver
-  - google-gke-upgrade
   - google-gce-upgrade
   - google-kops-gce
+  - google-osconfig
   - google-rules_k8s
   - google-soak
   - google-unit
@@ -665,5 +604,4 @@ dashboard_groups:
 - name: sig-auth
   dashboard_names:
   - sig-auth-gce
-  - sig-auth-gke
   - sig-auth-secrets-store-csi-driver
