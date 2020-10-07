@@ -60,6 +60,7 @@ var (
 		"sig",
 		"wg",
 		"provider",
+		"kubernetes-clients",
 	}
 	dashboardPrefixes = [][]string{orgs, companies}
 
@@ -77,6 +78,9 @@ var protoPath = flag.String("config", "", "Path to TestGrid config proto")
 // Shared testgrid config, loaded at TestMain.
 var cfg *config_pb.Configuration
 
+// Shared prow config, loaded at Test Main
+var prowConfig *prow_config.Config
+
 func TestMain(m *testing.M) {
 	flag.Parse()
 	if *protoPath == "" {
@@ -87,7 +91,13 @@ func TestMain(m *testing.M) {
 	var err error
 	cfg, err = config.Read(*protoPath, context.Background(), nil)
 	if err != nil {
-		fmt.Printf("Could not load config: %v", err)
+		fmt.Printf("Could not load config: %v\n", err)
+		os.Exit(1)
+	}
+
+	prowConfig, err = prow_config.Load(*prowPath, *jobPath)
+	if err != nil {
+		fmt.Printf("Could not load prow configs: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -344,17 +354,18 @@ func TestConfig(t *testing.T) {
 	}
 }
 
-// TODO(spiffxp): These are all repos that don't have their presubmits in testgrid.
+// TODO: These are all repos that don't have their presubmits in testgrid.
 // Convince sig leads or subproject owners this is a bad idea and whittle this down
 // to just kubernetes-security/
+// Tracking issue: https://github.com/kubernetes/test-infra/issues/18159
 var noPresubmitsInTestgridPrefixes = []string{
 	"containerd/cri",
 	"GoogleCloudPlatform/k8s-multicluster-ingress",
 	"kubeflow/pipelines",
 	"kubernetes-sigs/cluster-capacity",
-	"kubernetes-sigs/gcp-compute-persistent-disk-csi-driver",
 	"kubernetes-sigs/gcp-filestore-csi-driver",
 	"kubernetes-sigs/kind",
+	"kubernetes-sigs/kubetest2",
 	"kubernetes-sigs/kubebuilder-declarative-pattern",
 	"kubernetes-sigs/scheduler-plugins",
 	"kubernetes-sigs/service-catalog",
@@ -381,16 +392,61 @@ func hasAnyPrefix(s string, prefixes []string) bool {
 	return false
 }
 
+// A job is merge-blocking if it:
+// - is not optional
+// - reports (aka does not skip reporting)
+// - always runs OR runs if some path changed
+func isMergeBlocking(job prow_config.Presubmit) bool {
+	return !job.Optional && !job.SkipReport && (job.AlwaysRun || job.RunIfChanged != "")
+}
+
+// All jobs in presubmits-kuberentes-blocking must be merge-blocking for kubernetes/kubernetes
+// All jobs that are merge-blocking for kubernetes/kubernetes must be in presubmits-kubernetes-blocking
+func TestPresubmitsKubernetesDashboards(t *testing.T) {
+	var dashboard *config_pb.Dashboard
+	repo := "kubernetes/kubernetes"
+	dash := "presubmits-kubernetes-blocking"
+	for _, d := range cfg.Dashboards {
+		if d.Name == dash {
+			dashboard = d
+		}
+	}
+	if dashboard == nil {
+		t.Errorf("Missing dashboard: %s", dash)
+	}
+	testgroups := make(map[string]bool)
+	for _, tab := range dashboard.DashboardTab {
+		testgroups[tab.TestGroupName] = false
+	}
+	jobs := make(map[string]bool)
+	for _, job := range prowConfig.AllStaticPresubmits([]string{repo}) {
+		if isMergeBlocking(job) {
+			jobs[job.Name] = false
+		}
+	}
+	for job, seen := range jobs {
+		if _, ok := testgroups[job]; !seen && !ok {
+			t.Errorf("%s: job is merge-blocking for %s but missing from %s", job, repo, dash)
+		}
+		jobs[job] = true
+	}
+	for tg, seen := range testgroups {
+		if _, ok := jobs[tg]; !seen && !ok {
+			t.Errorf("%s: should not be in %s because not actually merge-blocking for %s", tg, dash, repo)
+		}
+		testgroups[tg] = true
+	}
+}
+
 func TestKubernetesProwInstanceJobsMustHaveMatchingTestgridEntries(t *testing.T) {
 	jobs := make(map[string]bool)
 
-	prowConfig, err := prow_config.Load(*prowPath, *jobPath)
-	if err != nil {
-		t.Fatalf("Could not load prow configs: %v\n", err)
-	}
-
 	for repo, presubmits := range prowConfig.PresubmitsStatic {
+		// Assume that all jobs in the exceptionList are valid
 		if hasAnyPrefix(repo, noPresubmitsInTestgridPrefixes) {
+			for _, job := range presubmits {
+				jobs[job.Name] = true
+			}
 			continue
 		}
 		for _, job := range presubmits {
@@ -442,7 +498,7 @@ func TestKubernetesProwInstanceJobsMustHaveMatchingTestgridEntries(t *testing.T)
 	for testgroup, valid := range testgroups {
 		if !valid {
 			badconfigs = append(badconfigs, testgroup)
-			t.Errorf("Testgrid group %v does not have a matching jenkins or prow job", testgroup)
+			t.Errorf("Testgrid group %v is supposed to be moved to have their presubmits in testgrid. See this issue: https://github.com/kubernetes/test-infra/issues/18159", testgroup)
 		}
 	}
 }

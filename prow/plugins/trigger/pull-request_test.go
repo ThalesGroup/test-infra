@@ -17,6 +17,7 @@ limitations under the License.
 package trigger
 
 import (
+	"context"
 	"encoding/json"
 	"strconv"
 	"testing"
@@ -88,7 +89,7 @@ func TestTrusted(t *testing.T) {
 	for _, tc := range testcases {
 		t.Run(tc.name, func(t *testing.T) {
 			g := &fakegithub.FakeClient{
-				OrgMembers:    map[string][]string{"kubernetes": {sister}, "kubernetes-incubator": {member, fakegithub.Bot}},
+				OrgMembers:    map[string][]string{"kubernetes": {sister}, "kubernetes-sigs": {member, fakegithub.Bot}},
 				Collaborators: []string{friend},
 				IssueComments: map[int][]github.IssueComment{},
 			}
@@ -102,7 +103,7 @@ func TestTrusted(t *testing.T) {
 					Name: label,
 				})
 			}
-			_, actual, err := TrustedPullRequest(g, trigger, tc.author, "kubernetes-incubator", "random-repo", 1, labels)
+			_, actual, err := TrustedPullRequest(g, trigger, tc.author, "kubernetes-sigs", "random-repo", 1, labels)
 			if err != nil {
 				t.Fatalf("Didn't expect error: %s", err)
 			}
@@ -138,6 +139,7 @@ func TestHandlePullRequest(t *testing.T) {
 		prChanges     bool
 		prAction      github.PullRequestEventAction
 		prIsDraft     bool
+		eventSender   string
 		jobToAbort    *prowapi.ProwJob
 	}{
 		{
@@ -347,6 +349,7 @@ func TestHandlePullRequest(t *testing.T) {
 
 			Author:      "t",
 			ShouldBuild: true,
+			eventSender: "not-k8s-ci-robot",
 			prAction:    github.PullRequestActionLabeled,
 			prLabel:     labels.OkToTest,
 		},
@@ -355,13 +358,15 @@ func TestHandlePullRequest(t *testing.T) {
 
 			Author:      "u",
 			ShouldBuild: true,
+			eventSender: "not-k8s-ci-robot",
 			prAction:    github.PullRequestActionLabeled,
 			prLabel:     labels.OkToTest,
 		},
 		{
 			name: "Label added by a bot. Build should not be triggered in this case.",
 
-			Author:      "k8s-ci-robot",
+			Author:      "u",
+			eventSender: "k8s-ci-robot",
 			prLabel:     labels.OkToTest,
 			prAction:    github.PullRequestActionLabeled,
 			ShouldBuild: false,
@@ -380,7 +385,7 @@ func TestHandlePullRequest(t *testing.T) {
 
 			Author:      "t",
 			HasOkToTest: true,
-			prAction:    github.PullRequestConvertedToDraft,
+			prAction:    github.PullRequestActionConvertedToDraft,
 			ShouldBuild: false,
 			jobToAbort:  jobToAbort,
 		},
@@ -432,6 +437,9 @@ func TestHandlePullRequest(t *testing.T) {
 			if tc.HasOkToTest {
 				g.IssueLabelsExisting = append(g.IssueLabelsExisting, issueLabels(labels.OkToTest)...)
 			}
+			if tc.eventSender == "" {
+				tc.eventSender = tc.Author
+			}
 			pr := github.PullRequestEvent{
 				Action: tc.prAction,
 				Label:  github.Label{Name: tc.prLabel},
@@ -447,6 +455,9 @@ func TestHandlePullRequest(t *testing.T) {
 						},
 					},
 					Draft: tc.prIsDraft,
+				},
+				Sender: github.User{
+					Login: tc.eventSender,
 				},
 			}
 			if tc.prChanges {
@@ -479,7 +490,7 @@ func TestHandlePullRequest(t *testing.T) {
 				t.Errorf("Expected no comments to github, but got %d", len(g.IssueCommentsAdded))
 			}
 			if tc.jobToAbort != nil {
-				pj, err := fakeProwJobClient.ProwV1().ProwJobs("namespace").Get(tc.jobToAbort.Name, metav1.GetOptions{})
+				pj, err := fakeProwJobClient.ProwV1().ProwJobs("namespace").Get(context.Background(), tc.jobToAbort.Name, metav1.GetOptions{})
 				if err != nil {
 					t.Fatalf("failed to get prowjob: %v", err)
 				}
@@ -579,7 +590,7 @@ func TestAbortAllJobs(t *testing.T) {
 				t.Fatalf("error caling abortAllJobs: %v", err)
 			}
 
-			pj, err := pjClient.ProwV1().ProwJobs("").Get(pj().Name, metav1.GetOptions{})
+			pj, err := pjClient.ProwV1().ProwJobs("").Get(context.Background(), pj().Name, metav1.GetOptions{})
 			if err != nil {
 				t.Fatalf("failed to get prowjob: %v", err)
 			}

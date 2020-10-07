@@ -223,6 +223,7 @@ func init() {
 }
 
 var simplifier = simplifypath.NewSimplifier(l("", // shadow element mimicing the root
+	l(""),
 	l("badge.svg"),
 	l("command-help"),
 	l("config"),
@@ -358,7 +359,7 @@ func main() {
 			logrus.WithError(err).Fatal("Error getting manager.")
 		}
 		// Force a cache for ProwJobs
-		if _, err := mgr.GetCache().GetInformer(&prowapi.ProwJob{}); err != nil {
+		if _, err := mgr.GetCache().GetInformer(context.TODO(), &prowapi.ProwJob{}); err != nil {
 			logrus.WithError(err).Fatal("Failed to get prowjob informer")
 		}
 		go func() {
@@ -511,8 +512,8 @@ type podLogClient struct {
 	client corev1.PodInterface
 }
 
-func (c *podLogClient) GetLogs(name string) ([]byte, error) {
-	reader, err := c.client.GetLogs(name, &coreapi.PodLogOptions{Container: kube.TestContainerName}).Stream()
+func (c *podLogClient) GetLogs(name, container string) ([]byte, error) {
+	reader, err := c.client.GetLogs(name, &coreapi.PodLogOptions{Container: container}).Stream(context.TODO())
 	if err != nil {
 		return nil, err
 	}
@@ -798,7 +799,19 @@ func handleProwJobs(ja *jobs.JobAgent, log *logrus.Entry) http.HandlerFunc {
 					jobs[i].Spec.DecorationConfig = nil
 				}
 				if set.Has(PodSpec) {
-					jobs[i].Spec.PodSpec = nil
+					// when we omit the podspec, we don't set it completely to nil
+					// instead, we set it to a new podspec that just has an empty container for each container that exists in the actual podspec
+					// this is so we can determine how many containers there are for a given prowjob without fetching all of the podspec details
+					// this is necessary for prow/cmd/deck/static/prow/prow.ts to determine whether the logIcon should link to a log endpoint or to spyglass
+					if jobs[i].Spec.PodSpec != nil {
+						emptyContainers := []coreapi.Container{}
+						for range jobs[i].Spec.PodSpec.Containers {
+							emptyContainers = append(emptyContainers, coreapi.Container{})
+						}
+						jobs[i].Spec.PodSpec = &coreapi.PodSpec{
+							Containers: emptyContainers,
+						}
+					}
 				}
 			}
 		}
@@ -876,11 +889,13 @@ func handleBadge(ja *jobs.JobAgent) http.HandlerFunc {
 func handleJobHistory(o options, cfg config.Getter, opener io.Opener, log *logrus.Entry) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		setHeadersNoCaching(w)
-		tmpl, err := getJobHistory(r.Context(), r.URL, opener)
+		tmpl, err := getJobHistory(r.Context(), r.URL, cfg, opener)
 		if err != nil {
 			msg := fmt.Sprintf("failed to get job history: %v", err)
-			log.WithField("url", r.URL.String()).Warn(msg)
-			http.Error(w, msg, http.StatusInternalServerError)
+			if shouldLogHTTPErrors(err) {
+				log.WithField("url", r.URL.String()).Warn(msg)
+			}
+			http.Error(w, msg, httpStatusForError(err))
 			return
 		}
 		handleSimpleTemplate(o, cfg, "job-history.html", tmpl)(w, r)
@@ -922,9 +937,11 @@ func handleRequestJobViews(sg *spyglass.Spyglass, cfg config.Getter, o options, 
 		csrfToken := csrf.Token(r)
 		page, err := renderSpyglass(r.Context(), sg, cfg, src, o, csrfToken, log)
 		if err != nil {
-			log.WithError(err).Error("error rendering spyglass page")
-			message := fmt.Sprintf("error rendering spyglass page: %v", err)
-			http.Error(w, message, http.StatusInternalServerError)
+			msg := fmt.Sprintf("error rendering spyglass page: %v", err)
+			if shouldLogHTTPErrors(err) {
+				log.WithError(err).Error(msg)
+			}
+			http.Error(w, msg, httpStatusForError(err))
 			return
 		}
 
@@ -948,13 +965,12 @@ func renderSpyglass(ctx context.Context, sg *spyglass.Spyglass, cfg config.Gette
 		return "", fmt.Errorf("error when resolving real path %s: %v", src, err)
 	}
 	src = realPath
-
 	artifactNames, err := sg.ListArtifacts(ctx, src)
 	if err != nil {
 		return "", fmt.Errorf("error listing artifacts: %v", err)
 	}
 	if len(artifactNames) == 0 {
-		return "", fmt.Errorf("found no artifacts for %s", src)
+		log.Infof("found no artifacts for %s", src)
 	}
 
 	regexCache := cfg().Deck.Spyglass.RegexCache
@@ -1013,8 +1029,14 @@ lensesLoop:
 		log.WithError(err).Warningf("Error getting ProwJob name for source %q.", src)
 	}
 
+	prHistLink := ""
+	org, repo, number, err := sg.RunToPR(src)
+	if err == nil {
+		prHistLink = "/pr-history?org=" + org + "&repo=" + repo + "&pr=" + strconv.Itoa(number)
+	}
+
 	artifactsLink := ""
-	gcswebPrefix := cfg().Deck.Spyglass.GCSBrowserPrefix
+	gcswebPrefix := cfg().Deck.Spyglass.GCSBrowserPrefixes.GetGCSBrowserPrefix(org, repo)
 	if gcswebPrefix != "" {
 		runPath, err := sg.RunPath(src)
 		if err == nil {
@@ -1026,13 +1048,7 @@ lensesLoop:
 		}
 	}
 
-	prHistLink := ""
-	org, repo, number, err := sg.RunToPR(src)
-	if err == nil {
-		prHistLink = "/pr-history?org=" + org + "&repo=" + repo + "&pr=" + strconv.Itoa(number)
-	}
-
-	jobName, buildID, err := sg.KeyToJob(src)
+	jobName, buildID, err := common.KeyToJob(src)
 	if err != nil {
 		return "", fmt.Errorf("error determining jobName / buildID: %v", err)
 	}
@@ -1164,6 +1180,10 @@ func handleArtifactView(o options, sg *spyglass.Spyglass, cfg config.Getter) htt
 			http.Error(w, fmt.Sprintf("Failed to parse request: %v", err), http.StatusBadRequest)
 			return
 		}
+		if err := validateStoragePath(cfg, request.Source); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to process request: %v", err), httpStatusForError(err))
+			return
+		}
 
 		handleRemoteLens(*lens, w, r, resource, request)
 	}
@@ -1282,7 +1302,7 @@ func handlePluginHelp(ha *helpAgent, log *logrus.Entry) http.HandlerFunc {
 }
 
 type logClient interface {
-	GetJobLog(job, id string) ([]byte, error)
+	GetJobLog(job, id, container string) ([]byte, error)
 }
 
 // TODO(spxtr): Cache, rate limit.
@@ -1292,12 +1312,16 @@ func handleLog(lc logClient, log *logrus.Entry) http.HandlerFunc {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		job := r.URL.Query().Get("job")
 		id := r.URL.Query().Get("id")
-		logger := log.WithFields(logrus.Fields{"job": job, "id": id})
+		container := r.URL.Query().Get("container")
+		if container == "" {
+			container = kube.TestContainerName
+		}
+		logger := log.WithFields(logrus.Fields{"job": job, "id": id, "container": container})
 		if err := validateLogRequest(r); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		jobLog, err := lc.GetJobLog(job, id)
+		jobLog, err := lc.GetJobLog(job, id, container)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Log not found: %v", err), http.StatusNotFound)
 			logger := logger.WithError(err)
@@ -1344,7 +1368,7 @@ func handleProwJob(prowJobClient prowv1.ProwJobInterface, log *logrus.Entry) htt
 			return
 		}
 
-		pj, err := prowJobClient.Get(name, metav1.GetOptions{})
+		pj, err := prowJobClient.Get(context.TODO(), name, metav1.GetOptions{})
 		if err != nil {
 			http.Error(w, fmt.Sprintf("ProwJob not found: %v", err), http.StatusNotFound)
 			if !kerrors.IsNotFound(err) {
@@ -1409,7 +1433,7 @@ func handleRerun(prowJobClient prowv1.ProwJobInterface, createProwJob bool, cfg 
 			http.Error(w, "request did not provide the 'prowjob' query parameter", http.StatusBadRequest)
 			return
 		}
-		pj, err := prowJobClient.Get(name, metav1.GetOptions{})
+		pj, err := prowJobClient.Get(context.TODO(), name, metav1.GetOptions{})
 		if err != nil {
 			http.Error(w, fmt.Sprintf("ProwJob not found: %v", err), http.StatusNotFound)
 			if !kerrors.IsNotFound(err) {
@@ -1464,7 +1488,7 @@ func handleRerun(prowJobClient prowv1.ProwJobInterface, createProwJob bool, cfg 
 				}
 				return
 			}
-			created, err := prowJobClient.Create(&newPJ)
+			created, err := prowJobClient.Create(context.TODO(), &newPJ, metav1.CreateOptions{})
 			if err != nil {
 				l.WithError(err).Error("Error creating job")
 				http.Error(w, fmt.Sprintf("Error creating job: %v", err), http.StatusInternalServerError)
@@ -1606,4 +1630,35 @@ func defaultLensRemoteConfig(lfc *config.LensFileConfig) error {
 	}
 
 	return nil
+}
+
+func validateStoragePath(cfg config.Getter, path string) error {
+	parts := strings.Split(path, "/")
+	if len(parts) < 3 {
+		return fmt.Errorf("invalid path: %s (expecting format <storageType>/<bucket>/<folders...>)", path)
+	}
+	bucketName := parts[1]
+	if err := cfg().ValidateStorageBucket(bucketName); err != nil {
+		return httpError{
+			error:      err,
+			statusCode: http.StatusBadRequest,
+		}
+	}
+	return nil
+}
+
+type httpError struct {
+	error
+	statusCode int
+}
+
+func httpStatusForError(e error) int {
+	if httpErr, ok := e.(httpError); ok {
+		return httpErr.statusCode
+	}
+	return http.StatusInternalServerError
+}
+
+func shouldLogHTTPErrors(e error) bool {
+	return httpStatusForError(e) >= http.StatusInternalServerError // 5XX
 }

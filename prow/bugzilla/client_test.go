@@ -36,21 +36,25 @@ import (
 )
 
 var (
-	bugData   = []byte(`{"bugs":[{"alias":[],"assigned_to":"Steve Kuznetsov","assigned_to_detail":{"email":"skuznets","id":381851,"name":"skuznets","real_name":"Steve Kuznetsov"},"blocks":[],"cc":["Sudha Ponnaganti"],"cc_detail":[{"email":"sponnaga","id":426940,"name":"sponnaga","real_name":"Sudha Ponnaganti"}],"classification":"Red Hat","component":["Test Infrastructure"],"creation_time":"2019-05-01T19:33:36Z","creator":"Dan Mace","creator_detail":{"email":"dmace","id":330250,"name":"dmace","real_name":"Dan Mace"},"deadline":null,"depends_on":[],"docs_contact":"","dupe_of":null,"groups":[],"id":1705243,"is_cc_accessible":true,"is_confirmed":true,"is_creator_accessible":true,"is_open":true,"keywords":[],"last_change_time":"2019-05-17T15:13:13Z","op_sys":"Unspecified","platform":"Unspecified","priority":"unspecified","product":"OpenShift Container Platform","qa_contact":"","resolution":"","see_also":[],"severity":"medium","status":"VERIFIED","summary":"[ci] cli image flake affecting *-images jobs","target_milestone":"---","target_release":["3.11.z"],"url":"","version":["3.11.0"],"whiteboard":""}],"faults":[]}`)
-	bugStruct = &Bug{Alias: []string{}, AssignedTo: "Steve Kuznetsov", AssignedToDetail: &User{Email: "skuznets", ID: 381851, Name: "skuznets", RealName: "Steve Kuznetsov"}, Blocks: []int{}, CC: []string{"Sudha Ponnaganti"}, CCDetail: []User{{Email: "sponnaga", ID: 426940, Name: "sponnaga", RealName: "Sudha Ponnaganti"}}, Classification: "Red Hat", Component: []string{"Test Infrastructure"}, CreationTime: "2019-05-01T19:33:36Z", Creator: "Dan Mace", CreatorDetail: &User{Email: "dmace", ID: 330250, Name: "dmace", RealName: "Dan Mace"}, DependsOn: []int{}, ID: 1705243, IsCCAccessible: true, IsConfirmed: true, IsCreatorAccessible: true, IsOpen: true, Groups: []string{}, Keywords: []string{}, LastChangeTime: "2019-05-17T15:13:13Z", OperatingSystem: "Unspecified", Platform: "Unspecified", Priority: "unspecified", Product: "OpenShift Container Platform", SeeAlso: []string{}, Severity: "medium", Status: "VERIFIED", Summary: "[ci] cli image flake affecting *-images jobs", TargetRelease: []string{"3.11.z"}, TargetMilestone: "---", Version: []string{"3.11.0"}}
+	bugData         = []byte(`{"bugs":[{"alias":[],"assigned_to":"Steve Kuznetsov","assigned_to_detail":{"email":"skuznets","id":381851,"name":"skuznets","real_name":"Steve Kuznetsov"},"blocks":[],"cc":["Sudha Ponnaganti"],"cc_detail":[{"email":"sponnaga","id":426940,"name":"sponnaga","real_name":"Sudha Ponnaganti"}],"classification":"Red Hat","component":["Test Infrastructure"],"creation_time":"2019-05-01T19:33:36Z","creator":"Dan Mace","creator_detail":{"email":"dmace","id":330250,"name":"dmace","real_name":"Dan Mace"},"deadline":null,"depends_on":[],"docs_contact":"","dupe_of":null,"groups":[],"id":1705243,"is_cc_accessible":true,"is_confirmed":true,"is_creator_accessible":true,"is_open":true,"keywords":[],"last_change_time":"2019-05-17T15:13:13Z","op_sys":"Unspecified","platform":"Unspecified","priority":"unspecified","product":"OpenShift Container Platform","qa_contact":"","resolution":"","see_also":[],"severity":"medium","status":"VERIFIED","summary":"[ci] cli image flake affecting *-images jobs","target_milestone":"---","target_release":["3.11.z"],"url":"","version":["3.11.0"],"whiteboard":""}],"faults":[]}`)
+	bugStruct       = &Bug{Alias: []string{}, AssignedTo: "Steve Kuznetsov", AssignedToDetail: &User{Email: "skuznets", ID: 381851, Name: "skuznets", RealName: "Steve Kuznetsov"}, Blocks: []int{}, CC: []string{"Sudha Ponnaganti"}, CCDetail: []User{{Email: "sponnaga", ID: 426940, Name: "sponnaga", RealName: "Sudha Ponnaganti"}}, Classification: "Red Hat", Component: []string{"Test Infrastructure"}, CreationTime: "2019-05-01T19:33:36Z", Creator: "Dan Mace", CreatorDetail: &User{Email: "dmace", ID: 330250, Name: "dmace", RealName: "Dan Mace"}, DependsOn: []int{}, ID: 1705243, IsCCAccessible: true, IsConfirmed: true, IsCreatorAccessible: true, IsOpen: true, Groups: []string{}, Keywords: []string{}, LastChangeTime: "2019-05-17T15:13:13Z", OperatingSystem: "Unspecified", Platform: "Unspecified", Priority: "unspecified", Product: "OpenShift Container Platform", SeeAlso: []string{}, Severity: "medium", Status: "VERIFIED", Summary: "[ci] cli image flake affecting *-images jobs", TargetRelease: []string{"3.11.z"}, TargetMilestone: "---", Version: []string{"3.11.0"}}
+	bugAccessDenied = []byte(`{"error":true,"code":102,"message":"You are not authorized to access bug #2. To see this bug, you must first log in to an account with the appropriate permissions."}`)
+	bugInvalidBugID = []byte(`{"error":true,"code":101,"message":"Bug #3 does not exist."}`)
 )
 
 func clientForUrl(url string) *client {
 	return &client{
-		logger:   logrus.WithField("testing", "true"),
-		endpoint: url,
-		client: &http.Client{
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		logger: logrus.WithField("testing", "true"),
+		delegate: &delegate{
+			endpoint: url,
+			client: &http.Client{
+				Transport: &http.Transport{
+					TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+				},
 			},
-		},
-		getAPIKey: func() []byte {
-			return []byte("api-key")
+			getAPIKey: func() []byte {
+				return []byte("api-key")
+			},
 		},
 	}
 }
@@ -84,6 +88,10 @@ func TestGetBug(t *testing.T) {
 		} else {
 			if id == 1705243 {
 				w.Write(bugData)
+			} else if id == 2 {
+				w.Write(bugAccessDenied)
+			} else if id == 3 {
+				w.Write(bugInvalidBugID)
 			} else {
 				http.Error(w, "404 Not Found", http.StatusNotFound)
 			}
@@ -110,6 +118,28 @@ func TestGetBug(t *testing.T) {
 	}
 	if otherBug != nil {
 		t.Errorf("expected no bug, got: %v", otherBug)
+	}
+
+	// this should return access denied
+	accessDeniedBug, err := client.GetBug(2)
+	if err == nil {
+		t.Error("expected an error, but got none")
+	} else if !IsAccessDenied(err) {
+		t.Errorf("expected an access denied error, got %v", err)
+	}
+	if accessDeniedBug != nil {
+		t.Errorf("expected no bug, got: %v", accessDeniedBug)
+	}
+
+	// this should return invalid Bug ID
+	invalidIDBug, err := client.GetBug(3)
+	if err == nil {
+		t.Error("expected an error, but got none")
+	} else if !IsInvalidBugID(err) {
+		t.Errorf("expected an invalid bug error, got %v", err)
+	}
+	if invalidIDBug != nil {
+		t.Errorf("expected no bug, got: %v", invalidIDBug)
 	}
 }
 
@@ -255,6 +285,10 @@ func TestGetComments(t *testing.T) {
 		} else {
 			if id == 12345 {
 				w.Write(commentsJSON)
+			} else if id == 2 {
+				w.Write(bugAccessDenied)
+			} else if id == 3 {
+				w.Write(bugInvalidBugID)
 			} else {
 				http.Error(w, "404 Not Found", http.StatusNotFound)
 			}
@@ -280,6 +314,28 @@ func TestGetComments(t *testing.T) {
 	}
 	if otherBug != nil {
 		t.Errorf("expected no bug, got: %v", otherBug)
+	}
+
+	// this should return access denied
+	accessDeniedBug, err := client.GetComments(2)
+	if err == nil {
+		t.Error("expected an error, but got none")
+	} else if !IsAccessDenied(err) {
+		t.Errorf("expected an access denied error, got %v", err)
+	}
+	if accessDeniedBug != nil {
+		t.Errorf("expected no bug, got: %v", accessDeniedBug)
+	}
+
+	// this should return invalid Bug ID
+	invalidIDBug, err := client.GetComments(3)
+	if err == nil {
+		t.Error("expected an error, but got none")
+	} else if !IsInvalidBugID(err) {
+		t.Errorf("expected an invalid bug error, got %v", err)
+	}
+	if invalidIDBug != nil {
+		t.Errorf("expected no bug, got: %v", invalidIDBug)
 	}
 }
 
@@ -950,74 +1006,84 @@ func errorChecker(err error, t *testing.T) {
 	}
 }
 func TestGetAllClones(t *testing.T) {
-	fake := &Fake{}
-	fake.Bugs = map[int]Bug{}
-	fake.BugComments = map[int][]Comment{}
-	bug1Create := &BugCreate{
-		Summary: "Dummy bug to test getAllClones",
-	}
-	bug1ID, err := fake.CreateBug(bug1Create)
-	if err != nil {
-		t.Fatalf("Error while creating bug in Fake!\n")
-	}
-	bug1, err := fake.GetBug(bug1ID) //Original bug
-	errorChecker(err, t)
-	bug2ID, err := fake.CloneBug(bug1) //2nd level bug
-	errorChecker(err, t)
-	bug2, err := fake.GetBug(bug2ID)
-	errorChecker(err, t)
-	bug3ID, err := fake.CloneBug(bug2) //3rd level bug
-	errorChecker(err, t)
-	bug4ID, err := fake.CloneBug(bug1) //Sibling of 2nd level
-	errorChecker(err, t)
-	bug1, err = fake.GetBug(bug1ID)
-	errorChecker(err, t)
-	bug2, err = fake.GetBug(bug2ID)
-	errorChecker(err, t)
-	bug3, err := fake.GetBug(bug3ID)
-	errorChecker(err, t)
-	bug4, err := fake.GetBug(bug4ID)
-	errorChecker(err, t)
+
 	testcases := []struct {
-		name           string
-		bug            *Bug
-		expectedClones sets.Int
+		name            string
+		bugs            []Bug
+		bugToBeSearched Bug
+		expectedClones  sets.Int
 	}{
 		{
-			"Clones including multiple children",
-			bug1,
-			sets.NewInt(bug2ID, bug3ID, bug4ID),
+			name: "Clones for the root node",
+			bugs: []Bug{
+				{Summary: "", ID: 1, Blocks: []int{2, 5}},
+				{Summary: "", ID: 2, DependsOn: []int{1}, Blocks: []int{3}},
+				{Summary: "", ID: 3, DependsOn: []int{2}},
+				{Summary: "Not a clone", ID: 4, DependsOn: []int{1}},
+				{Summary: "", ID: 5, DependsOn: []int{1}},
+			},
+			bugToBeSearched: Bug{Summary: "", ID: 1, Blocks: []int{2, 5}},
+			expectedClones:  sets.NewInt(1, 2, 3, 5),
 		},
 		{
-			"Clones should include parent as well as child",
-			bug2,
-			sets.NewInt(bug1ID, bug3ID, bug4ID),
+			name: "Clones for child of root",
+			bugs: []Bug{
+				{Summary: "", ID: 1, Blocks: []int{2, 5}},
+				{Summary: "", ID: 2, DependsOn: []int{1}, Blocks: []int{3}},
+				{Summary: "", ID: 3, DependsOn: []int{2}},
+				{Summary: "Not a clone", ID: 4, DependsOn: []int{1}},
+				{Summary: "", ID: 5, DependsOn: []int{1}},
+			},
+			bugToBeSearched: Bug{Summary: "", ID: 2, DependsOn: []int{1}, Blocks: []int{3}},
+			expectedClones:  sets.NewInt(1, 2, 3, 5),
 		},
 		{
-			"Clones includes parent and grandparent",
-			bug3,
-			sets.NewInt(bug1ID, bug2ID, bug4ID),
+			name: "Clones for grandchild of root",
+			bugs: []Bug{
+				{Summary: "", ID: 1, Blocks: []int{2, 5}},
+				{Summary: "", ID: 2, DependsOn: []int{1}, Blocks: []int{3}},
+				{Summary: "", ID: 3, DependsOn: []int{2}},
+				{Summary: "Not a clone", ID: 4, DependsOn: []int{1}},
+				{Summary: "", ID: 5, DependsOn: []int{1}},
+			},
+			bugToBeSearched: Bug{Summary: "", ID: 3, DependsOn: []int{2}},
+			expectedClones:  sets.NewInt(1, 2, 3, 5),
 		},
 		{
-			"Clones when not directly related",
-			bug4,
-			sets.NewInt(bug1ID, bug2ID, bug3ID),
+			name: "Clones when no clone is expected",
+			bugs: []Bug{
+				{Summary: "", ID: 1, Blocks: []int{2, 5}},
+				{Summary: "", ID: 2, DependsOn: []int{1}, Blocks: []int{3}},
+				{Summary: "", ID: 3, DependsOn: []int{2}},
+				{Summary: "Not a clone", ID: 4, DependsOn: []int{1}},
+				{Summary: "", ID: 5, DependsOn: []int{1}},
+			},
+			bugToBeSearched: Bug{Summary: "Not a clone", ID: 4, DependsOn: []int{1}},
+			expectedClones:  sets.NewInt(4),
 		},
 	}
 	for _, tc := range testcases {
 		t.Run(tc.name, func(t *testing.T) {
-			clones, err := getAllClones(fake, tc.bug)
+			fake := &Fake{
+				Bugs:        map[int]Bug{},
+				BugComments: map[int][]Comment{},
+			}
+			for _, bug := range tc.bugs {
+				fake.Bugs[bug.ID] = bug
+			}
+			bugCache := newBugDetailsCache()
+			clones, err := getAllClones(fake, &tc.bugToBeSearched, bugCache)
 			if err != nil {
 				t.Errorf("Error occurred when none was expected: %v", err)
 			}
-			if len(tc.expectedClones) != len(clones) {
-				t.Errorf("Mismatch in number of clones - expected: %d, got %d", len(tc.expectedClones), len(clones))
-			}
+			actualCloneSet := sets.NewInt()
 			for _, clone := range clones {
-				if ok := tc.expectedClones.Has(clone.ID); !ok {
-					t.Errorf("Unexpected clone found in list - expecting: %v, got: %d", tc.expectedClones, clone.ID)
-				}
+				actualCloneSet.Insert(clone.ID)
 			}
+			if !tc.expectedClones.Equal(actualCloneSet) {
+				t.Errorf("clones mismatch - expected %v, got %v", tc.expectedClones, actualCloneSet)
+			}
+
 		})
 
 	}

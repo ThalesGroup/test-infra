@@ -42,7 +42,7 @@ JOB_CONFIG_PATH="${JOB_CONFIG_PATH:-}"
 
 usage() {
   echo "Usage: $(basename "$0") [--list || --latest || --upstream || vYYYYMMDD-deadbeef]" >&2
-  exit 1
+  return 1
 }
 
 main() {
@@ -68,7 +68,14 @@ main() {
   fi
   echo -e "Bumping: 'gcr.io/k8s-prow/' images to $(color-version "${new_version}") ..." >&2
 
-  bumpfiles=($(add_suffix "$(split_on_commas "$COMPONENT_FILE_DIR")"))
+  local component_file_dir_array
+  IFS=, read -ra component_file_dir_array <<< "${COMPONENT_FILE_DIR}"
+  bumpfiles=()
+  for c in "${component_file_dir_array[@]}"; do
+    # This expands wildcards into files if they exist
+    bumpfiles+=(${c}/*.yaml)
+  done
+
   bumpfiles+=("${CONFIG_PATH}")
   if [[ -n "${JOB_CONFIG_PATH}" ]]; then
     bumpfiles+=($(grep -rl -e "gcr.io/k8s-prow/" "${JOB_CONFIG_PATH}"; true))
@@ -97,7 +104,7 @@ main() {
         echo "The image ${image} does not exist, please double check." >&2
         # Revert the changes for this file.
         git checkout -- "${file}"
-        exit 1
+        return 1
       fi
     done
   done
@@ -108,12 +115,11 @@ main() {
 check-args() {
   if [[ -z "${COMPONENT_FILE_DIR}" ]]; then
     echo "ERROR: COMPONENT_FILE_DIR must be specified as an env var." >&2
+    return 1
   fi
   if [[ -z "${CONFIG_PATH}" ]]; then
     echo "ERROR: CONFIG_PATH must be specified as an env var." >&2
-  fi
-  if [[ -z "${JOB_CONFIG_PATH}" ]]; then
-    echo "ERROR: JOB_CONFIG_PATH must be specified as an env var." >&2
+    return 1
   fi
 }
 
@@ -127,7 +133,7 @@ check-requirements() {
   if ! (${SED} --version 2>&1 | grep -q GNU); then
     # darwin is great (not)
     echo "!!! GNU sed is required.  If on OS X, use 'brew install gnu-sed'." >&2
-    exit 1
+    return 1
   fi
 
   TAC=tac
@@ -138,7 +144,7 @@ check-requirements() {
 
   if ! command -v "${TAC}" &>/dev/null; then
     echo "tac (reverse cat) required. If on OS X then 'brew install coreutils'." >&2
-    exit 1
+    return 1
   fi
 
   if [[ -n "${GOOGLE_APPLICATION_CREDENTIALS:-}" ]]; then
@@ -169,7 +175,7 @@ list() {
   mapfile -t options < <(list-options 10)
   if [[ -z "${options[*]}" ]]; then
     echo "No versions found" >&2
-    exit 1
+    return 1
   fi
   local def_opt=$(upstream-version)
   new_version=
@@ -193,21 +199,9 @@ list() {
     done
     if [[ -z "${found}" ]]; then
       echo "Invalid version: ${new_version}" >&2
-      exit 1
+      return 1
     fi
   fi
-}
-
-split_on_commas() {
-  local IFS=,
-  local array=("$1")
-  echo "${array[@]}"
-}
-
-add_suffix() {
-  local array=("$1")
-  local suffix="${2:-/*.yaml}"
-  echo "${array[@]/%/$suffix}"
 }
 
 # See https://misc.flogisoft.com/bash/tip_colors_and_formatting

@@ -6,7 +6,7 @@ periodics:
     testgrid-dashboards: sig-release-master-blocking, sig-testing-kind
     testgrid-tab-name: kind-master-parallel
     description: Uses kubetest to run e2e tests against a latest kubernetes master cluster created with sigs.k8s.io/kind
-    testgrid-alert-email: bentheelder@google.com,antonio.ojea.garcia@gmail.com,kubernetes-release-team@googlegroups.com
+    testgrid-alert-email: bentheelder@google.com,antonio.ojea.garcia@gmail.com,release-team@kubernetes.io
     testgrid-num-columns-recent: '6'
     fork-per-release: "true"
     fork-per-release-periodic-interval: 1h 2h 6h 24h
@@ -25,7 +25,7 @@ periodics:
     path_alias: k8s.io/kubernetes
   spec:
     containers:
-    - image: gcr.io/k8s-testimages/krte:v20200619-19b0ee3-master
+    - image: gcr.io/k8s-testimages/krte:v20200916-8dd1247-master
       command:
       - wrapper.sh
       - bash
@@ -45,12 +45,14 @@ periodics:
       securityContext:
         privileged: true
       resources:
+        limits:
+          memory: 9Gi
+          cpu: 7
         requests:
           # these are both a bit below peak usage during build
           # this is mostly for building kubernetes
-          memory: "9000Mi"
-          # during the tests more like 3-20m is used
-          cpu: 7400m
+          memory: 9Gi
+          cpu: 7
 - interval: 1h
   cluster: k8s-infra-prow-build
   name: ci-kubernetes-kind-ipv6-e2e-parallel
@@ -58,7 +60,7 @@ periodics:
     testgrid-dashboards: sig-release-master-blocking, sig-testing-kind
     testgrid-tab-name: kind-ipv6-master-parallel
     description: Uses kubetest to run e2e tests against a latest kubernetes master IPv6 cluster created with sigs.k8s.io/kind
-    testgrid-alert-email: bentheelder@google.com,antonio.ojea.garcia@gmail.com,kubernetes-release-team@googlegroups.com
+    testgrid-alert-email: bentheelder@google.com,antonio.ojea.garcia@gmail.com,release-team@kubernetes.io
     testgrid-num-columns-recent: '6'
     fork-per-release: "true"
     fork-per-release-periodic-interval: 1h 2h 6h 24h
@@ -77,7 +79,7 @@ periodics:
     path_alias: k8s.io/kubernetes
   spec:
     containers:
-    - image: gcr.io/k8s-testimages/krte:v20200619-19b0ee3-master
+    - image: gcr.io/k8s-testimages/krte:v20200916-8dd1247-master
       command:
       - wrapper.sh
       - bash
@@ -103,9 +105,12 @@ periodics:
       securityContext:
         privileged: true
       resources:
+        limits:
+          memory: 9Gi
+          cpu: 7
         requests:
           # these are both a bit below peak usage during build
           # this is mostly for building kubernetes
-          memory: "9000Mi"
+          memory: 9Gi
           # during the tests more like 3-20m is used
-          cpu: 2000m
+          cpu: 7

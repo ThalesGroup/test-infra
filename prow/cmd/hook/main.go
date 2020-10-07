@@ -31,6 +31,7 @@ import (
 	"k8s.io/test-infra/prow/config/secret"
 	prowflagutil "k8s.io/test-infra/prow/flagutil"
 	"k8s.io/test-infra/prow/git/v2"
+	"k8s.io/test-infra/prow/githubeventserver"
 	"k8s.io/test-infra/prow/hook"
 	"k8s.io/test-infra/prow/interrupts"
 	"k8s.io/test-infra/prow/logrusutil"
@@ -145,6 +146,10 @@ func main() {
 			logrus.WithError(err).Fatal("Error getting Bugzilla client.")
 		}
 		bugzillaClient = client
+	} else {
+		// we want something non-nil here with good no-op behavior,
+		// so the test fake is a cheap way to do that
+		bugzillaClient = &bugzilla.Fake{}
 	}
 
 	infrastructureClient, err := o.kubernetes.InfrastructureClusterClient(o.dryRun)
@@ -194,7 +199,7 @@ func main() {
 		BugzillaClient:            bugzillaClient,
 	}
 
-	promMetrics := hook.NewMetrics()
+	promMetrics := githubeventserver.NewMetrics()
 
 	defer interrupts.WaitForGracefulShutdown()
 

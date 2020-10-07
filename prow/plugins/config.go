@@ -17,13 +17,13 @@ limitations under the License.
 package plugins
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path"
 	"regexp"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -35,6 +35,7 @@ import (
 	"k8s.io/test-infra/prow/bugzilla"
 	"k8s.io/test-infra/prow/kube"
 	"k8s.io/test-infra/prow/labels"
+	"k8s.io/test-infra/prow/logrusutil"
 )
 
 const (
@@ -274,6 +275,10 @@ type Approve struct {
 	// The default value is "https://go.k8s.io/bot-commands". The command help page is served by Deck
 	// and available under https://<deck-url>/command-help, e.g. "https://prow.k8s.io/command-help"
 	CommandHelpLink string `json:"commandHelpLink"`
+
+	// PrProcessLink is the link to the help page which explains the code review process.
+	// The default value is "https://git.k8s.io/community/contributors/guide/owners.md#the-code-review-process".
+	PrProcessLink string `json:"pr_process_link,omitempty"`
 }
 
 var (
@@ -284,7 +289,7 @@ var (
 
 func (a Approve) HasSelfApproval() bool {
 	if a.DeprecatedImplicitSelfApprove != nil {
-		warnDeprecated(&warnImplicitSelfApprove, 5*time.Minute, "Please update plugins.yaml to use require_self_approval instead of the deprecated implicit_self_approve before June 2019")
+		logrusutil.ThrottledWarnf(&warnImplicitSelfApprove, 5*time.Minute, "Please update plugins.yaml to use require_self_approval instead of the deprecated implicit_self_approve before June 2019")
 		return *a.DeprecatedImplicitSelfApprove
 	} else if a.RequireSelfApproval != nil {
 		return !*a.RequireSelfApproval
@@ -294,7 +299,7 @@ func (a Approve) HasSelfApproval() bool {
 
 func (a Approve) ConsiderReviewState() bool {
 	if a.DeprecatedReviewActsAsApprove != nil {
-		warnDeprecated(&warnReviewActsAsApprove, 5*time.Minute, "Please update plugins.yaml to use ignore_review_state instead of the deprecated review_acts_as_approve before June 2019")
+		logrusutil.ThrottledWarnf(&warnReviewActsAsApprove, 5*time.Minute, "Please update plugins.yaml to use ignore_review_state instead of the deprecated review_acts_as_approve before June 2019")
 		return *a.DeprecatedReviewActsAsApprove
 	} else if a.IgnoreReviewState != nil {
 		return !*a.IgnoreReviewState
@@ -423,10 +428,21 @@ type ConfigMapSpec struct {
 	// Clusters is a map from cluster to namespaces
 	// which specifies the targets the configMap needs to be deployed, i.e., each namespace in map[cluster]
 	Clusters map[string][]string `json:"clusters"`
+	// ClusterGroup is a list of named cluster_groups to target. Mutually exclusive with clusters.
+	ClusterGroups []string `json:"cluster_groups,omitempty"`
+}
+
+// A ClusterGroup is a list of clusters with namespaces
+type ClusterGroup struct {
+	Clusters   []string `json:"clusters,omitempty"`
+	Namespaces []string `json:"namespaces,omitempty"`
 }
 
 // ConfigUpdater contains the configuration for the config-updater plugin.
 type ConfigUpdater struct {
+	// ClusterGroups is a map of ClusterGroups that can be used as a target
+	// in the map config.
+	ClusterGroups map[string]ClusterGroup `json:"cluster_groups,omitempty"`
 	// A map of filename => ConfigMapSpec.
 	// Whenever a commit changes filename, prow will update the corresponding configmap.
 	// map[string]ConfigMapSpec{ "/my/path.yaml": {Name: "foo", Namespace: "otherNamespace" }}
@@ -435,6 +451,57 @@ type ConfigUpdater struct {
 	// If GZIP is true then files will be gzipped before insertion into
 	// their corresponding configmap
 	GZIP bool `json:"gzip"`
+}
+
+type configUpdatedWithoutUnmarshaler ConfigUpdater
+
+func (cu *ConfigUpdater) UnmarshalJSON(d []byte) error {
+	var target configUpdatedWithoutUnmarshaler
+	if err := json.Unmarshal(d, &target); err != nil {
+		return err
+	}
+	*cu = ConfigUpdater(target)
+	return cu.resolve()
+}
+
+func (cu *ConfigUpdater) resolve() error {
+	var errs []error
+	for k, v := range cu.Maps {
+		if len(v.Clusters) > 0 && len(v.ClusterGroups) > 0 {
+			errs = append(errs, fmt.Errorf("item maps.%s contains both clusters and cluster_groups", k))
+			continue
+		}
+
+		if len(v.Clusters) > 0 {
+			continue
+		}
+
+		clusters := map[string][]string{}
+		for idx, clusterGroupName := range v.ClusterGroups {
+			clusterGroup, hasClusterGroup := cu.ClusterGroups[clusterGroupName]
+			if !hasClusterGroup {
+				errs = append(errs, fmt.Errorf("item maps.%s.cluster_groups.%d references inexistent cluster group named %s", k, idx, clusterGroupName))
+				continue
+			}
+			for _, cluster := range clusterGroup.Clusters {
+				clusters[cluster] = append(clusters[cluster], clusterGroup.Namespaces...)
+			}
+		}
+
+		cu.Maps[k] = ConfigMapSpec{
+			Name:                 v.Name,
+			Key:                  v.Key,
+			Namespace:            v.Namespace,
+			AdditionalNamespaces: v.AdditionalNamespaces,
+			GZIP:                 v.GZIP,
+			Namespaces:           v.Namespaces,
+			Clusters:             clusters,
+		}
+	}
+
+	cu.ClusterGroups = nil
+
+	return utilerrors.NewAggregate(errs)
 }
 
 // ProjectConfig contains the configuration options for the project plugin
@@ -505,10 +572,14 @@ type MergeWarning struct {
 	Repos []string `json:"repos,omitempty"`
 	// List of channels on which a event is published.
 	Channels []string `json:"channels,omitempty"`
-	// A slack event is published if the user is not part of the WhiteList.
+	// Deprecated: Use ExemptUsers instead.
 	WhiteList []string `json:"whitelist,omitempty"`
-	// A slack event is published if the user is not on the branch whitelist
+	// A slack event is published if the user is not part of the ExemptUsers.
+	ExemptUsers []string `json:"exempt_users,omitempty"`
+	// Deprecated: Use ExemptBranches instead.
 	BranchWhiteList map[string][]string `json:"branch_whitelist,omitempty"`
+	// A slack event is published if the user is not on the exempt branches.
+	ExemptBranches map[string][]string `json:"exempt_branches,omitempty"`
 }
 
 // Welcome is config for the welcome plugin.
@@ -616,29 +687,6 @@ func (r RequireMatchingLabel) validate() error {
 	return nil
 }
 
-var warnLock sync.RWMutex // Rare updates and concurrent readers, so reuse the same lock
-
-// warnDeprecated prints a deprecation warning for a particular configuration
-// option.
-func warnDeprecated(last *time.Time, freq time.Duration, msg string) {
-	// have we warned within the last freq?
-	warnLock.RLock()
-	fresh := time.Now().Sub(*last) <= freq
-	warnLock.RUnlock()
-	if fresh { // we've warned recently
-		return
-	}
-	// Warning is stale, will we win the race to warn?
-	warnLock.Lock()
-	defer warnLock.Unlock()
-	now := time.Now()           // Recalculate now, we might wait awhile for the lock
-	if now.Sub(*last) <= freq { // Nope, we lost
-		return
-	}
-	*last = now
-	logrus.Warn(msg)
-}
-
 // Describe generates a human readable description of the behavior that this
 // configuration specifies.
 func (r RequireMatchingLabel) Describe() string {
@@ -705,6 +753,12 @@ func (c *Configuration) ApproveFor(org, repo string) *Approve {
 	if a.DeprecatedReviewActsAsApprove == nil && a.IgnoreReviewState == nil && c.UseDeprecatedReviewApprove {
 		no := false
 		a.DeprecatedReviewActsAsApprove = &no
+	}
+	if a.CommandHelpLink == "" {
+		a.CommandHelpLink = "https://go.k8s.io/bot-commands"
+	}
+	if a.PrProcessLink == "" {
+		a.PrProcessLink = "https://git.k8s.io/community/contributors/guide/owners.md#the-code-review-process"
 	}
 	return a
 }
@@ -827,7 +881,7 @@ func (c *ConfigUpdater) SetDefaults() {
 
 	for name, spec := range c.Maps {
 		if spec.Namespace != "" || len(spec.AdditionalNamespaces) > 0 {
-			logrus.Warnf("'namespace' and 'additional_namespaces' are deprecated for config-updater plugin, use 'clusters' instead")
+			logrus.Warn("'namespace' and 'additional_namespaces' are deprecated for config-updater plugin and will be removed in October, 2020, use 'clusters' instead")
 		}
 		// as a result, namespaces will never be an empty slice (namespace in the slice could be empty string)
 		// and clusters will never be an empty map (map[cluster] could be am empty slice)
@@ -1060,7 +1114,35 @@ var warnTriggerTrustedOrg time.Time
 func validateTrigger(triggers []Trigger) error {
 	for _, trigger := range triggers {
 		if trigger.TrustedOrg != "" {
-			warnDeprecated(&warnTriggerTrustedOrg, 5*time.Minute, "trusted_org functionality is deprecated. Please ensure your configuration is updated before the end of December 2019.")
+			logrusutil.ThrottledWarnf(&warnTriggerTrustedOrg, 5*time.Minute, "trusted_org functionality is deprecated. Please ensure your configuration is updated before the end of December 2019.")
+		}
+	}
+	return nil
+}
+
+var (
+	warnSlackMergeWarningWhiteList       time.Time
+	warnSlackMergeWarningBranchWhiteList time.Time
+)
+
+func validateSlack(slack Slack) error {
+	for i := range slack.MergeWarnings {
+		if len(slack.MergeWarnings[i].WhiteList) > 0 {
+			if len(slack.MergeWarnings[i].ExemptUsers) > 0 {
+				return errors.New("invalid Slack merge warning configuration: both whitelist (deprecated) and exempt_users are set.")
+			}
+
+			logrusutil.ThrottledWarnf(&warnSlackMergeWarningWhiteList, 5*time.Minute, "whitelist field in Slack merge warning is deprecated and has been renamed to exempt_users. Please update your configuration.")
+			slack.MergeWarnings[i].ExemptUsers = slack.MergeWarnings[i].WhiteList
+		}
+
+		if len(slack.MergeWarnings[i].BranchWhiteList) > 0 {
+			if len(slack.MergeWarnings[i].ExemptBranches) > 0 {
+				return errors.New("invalid Slack merge warning configuration: both branch_whitelist (deprecated) and exempt_branches are set.")
+			}
+
+			logrusutil.ThrottledWarnf(&warnSlackMergeWarningBranchWhiteList, 5*time.Minute, "branch_whitelist field in Slack merge warning is deprecated and has been renamed to exempt_branches. Please update your configuration.")
+			slack.MergeWarnings[i].ExemptBranches = slack.MergeWarnings[i].BranchWhiteList
 		}
 	}
 	return nil
@@ -1103,14 +1185,6 @@ func compileRegexpsAndDurations(pc *Configuration) error {
 	return nil
 }
 
-func (c *Configuration) ApplyDefaults() {
-	for _, a := range c.Approve {
-		if a.CommandHelpLink == "" {
-			a.CommandHelpLink = "https://go.k8s.io/bot-commands"
-		}
-	}
-}
-
 func (c *Configuration) Validate() error {
 	if len(c.Plugins) == 0 {
 		logrus.Warn("no plugins specified-- check syntax?")
@@ -1145,6 +1219,9 @@ func (c *Configuration) Validate() error {
 		return err
 	}
 	if err := validateTrigger(c.Triggers); err != nil {
+		return err
+	}
+	if err := validateSlack(c.Slack); err != nil {
 		return err
 	}
 
@@ -1330,6 +1407,14 @@ type BugzillaBranchOptions struct {
 	// StateAfterMerge is the state to which the bug will be moved after all pull requests
 	// in the external bug tracker have been merged.
 	StateAfterMerge *BugzillaBugState `json:"state_after_merge,omitempty"`
+	// StateAfterClose is the state to which the bug will be moved if all pull requests
+	// in the external bug tracker have been closed.
+	StateAfterClose *BugzillaBugState `json:"state_after_close,omitempty"`
+
+	// AllowedGroups is a list of bugzilla bug group names that the bugzilla plugin can
+	// link to in PRs. If a bug is part of a group that is not in this list, the bugzilla
+	// plugin will not link the bug to the PR.
+	AllowedGroups []string `json:"allowed_groups,omitempty"`
 }
 
 type BugzillaBugStateSet map[BugzillaBugState]interface{}
@@ -1462,7 +1547,7 @@ func ResolveBugzillaOptions(parent, child BugzillaBranchOptions) BugzillaBranchO
 			output.DependentBugTargetReleases = parent.DependentBugTargetReleases
 		}
 		if parent.DeprecatedDependentBugTargetRelease != nil {
-			warnDeprecated(&warnDependentBugTargetRelease, 5*time.Minute, "Please update plugins.yaml to use dependent_bug_target_releases instead of the deprecated dependent_bug_target_release")
+			logrusutil.ThrottledWarnf(&warnDependentBugTargetRelease, 5*time.Minute, "Please update plugins.yaml to use dependent_bug_target_releases instead of the deprecated dependent_bug_target_release")
 			if parent.DependentBugTargetReleases == nil {
 				output.DependentBugTargetReleases = &[]string{*parent.DeprecatedDependentBugTargetRelease}
 			} else if !sets.NewString(*parent.DependentBugTargetReleases...).Has(*parent.DeprecatedDependentBugTargetRelease) {
@@ -1486,6 +1571,12 @@ func ResolveBugzillaOptions(parent, child BugzillaBranchOptions) BugzillaBranchO
 		}
 		if parent.StateAfterMerge != nil {
 			output.StateAfterMerge = parent.StateAfterMerge
+		}
+		if parent.StateAfterClose != nil {
+			output.StateAfterClose = parent.StateAfterClose
+		}
+		if parent.AllowedGroups != nil {
+			output.AllowedGroups = sets.NewString(output.AllowedGroups...).Insert(parent.AllowedGroups...).List()
 		}
 	}
 
@@ -1525,7 +1616,7 @@ func ResolveBugzillaOptions(parent, child BugzillaBranchOptions) BugzillaBranchO
 		output.DependentBugTargetReleases = child.DependentBugTargetReleases
 	}
 	if child.DeprecatedDependentBugTargetRelease != nil {
-		warnDeprecated(&warnDependentBugTargetRelease, 5*time.Minute, "Please update plugins.yaml to use dependent_bug_target_releases instead of the deprecated dependent_bug_target_release")
+		logrusutil.ThrottledWarnf(&warnDependentBugTargetRelease, 5*time.Minute, "Please update plugins.yaml to use dependent_bug_target_releases instead of the deprecated dependent_bug_target_release")
 		if child.DependentBugTargetReleases == nil {
 			output.DependentBugTargetReleases = &[]string{*child.DeprecatedDependentBugTargetRelease}
 		} else if !sets.NewString(*child.DependentBugTargetReleases...).Has(*child.DeprecatedDependentBugTargetRelease) {
@@ -1553,6 +1644,12 @@ func ResolveBugzillaOptions(parent, child BugzillaBranchOptions) BugzillaBranchO
 	}
 	if child.StateAfterMerge != nil {
 		output.StateAfterMerge = child.StateAfterMerge
+	}
+	if child.StateAfterClose != nil {
+		output.StateAfterClose = child.StateAfterClose
+	}
+	if child.AllowedGroups != nil {
+		output.AllowedGroups = sets.NewString(output.AllowedGroups...).Insert(child.AllowedGroups...).List()
 	}
 
 	// Status fields should not be used anywhere now when they were mirrored to states

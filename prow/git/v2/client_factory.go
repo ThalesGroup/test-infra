@@ -90,6 +90,9 @@ func (cfo *ClientFactoryOpts) Apply(target *ClientFactoryOpts) {
 	if cfo.Censor != nil {
 		target.Censor = cfo.Censor
 	}
+	if cfo.Username != nil {
+		target.Username = cfo.Username
+	}
 }
 
 // ClientFactoryOpts allows to manipulate the options for a ClientFactory
@@ -201,9 +204,13 @@ func (c *clientFactory) bootstrapClients(org, repo, dir string) (cacher, cloner,
 	}
 	client := &repoClient{
 		publisher: publisher{
-			remote:   c.remotes.PublishRemote(org, repo),
+			remotes: remotes{
+				publishRemote: c.remotes.PublishRemote(org, repo),
+				centralRemote: c.remotes.CentralRemote(org, repo),
+			},
 			executor: executor,
 			info:     c.gitUser,
+			logger:   logger,
 		},
 		interactor: interactor{
 			dir:      dir,

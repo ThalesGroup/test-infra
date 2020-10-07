@@ -287,6 +287,9 @@ func TestProwJobIndexer(t *testing.T) {
 				Job:   pjName,
 				Agent: prowv1.KubernetesAgent,
 			},
+			Status: prowv1.ProwJobStatus{
+				State: prowv1.PendingState,
+			},
 		}
 		for _, m := range modify {
 			m(pj)
@@ -300,7 +303,12 @@ func TestProwJobIndexer(t *testing.T) {
 	}{
 		{
 			name:     "Matches all keys",
-			expected: []string{prowJobIndexKeyAll, prowJobIndexKeyNotCompleted, prowJobIndexKeyNotCompletedByName(pjName)},
+			expected: []string{prowJobIndexKeyAll, prowJobIndexKeyPending, pendingTriggeredIndexKeyByName(pjName)},
+		},
+		{
+			name:     "Triggered goes into triggeredPending",
+			modify:   func(pj *prowv1.ProwJob) { pj.Status.State = prowv1.TriggeredState },
+			expected: []string{prowJobIndexKeyAll, pendingTriggeredIndexKeyByName(pjName)},
 		},
 		{
 			name:   "Wrong namespace, no key",
@@ -311,14 +319,14 @@ func TestProwJobIndexer(t *testing.T) {
 			modify: func(pj *prowv1.ProwJob) { pj.Spec.Agent = prowv1.TektonAgent },
 		},
 		{
-			name:     "Completed, matches only the `all` key",
-			modify:   func(pj *prowv1.ProwJob) { pj.SetComplete() },
+			name:     "Success, matches only the `all` key",
+			modify:   func(pj *prowv1.ProwJob) { pj.Status.State = prowv1.SuccessState },
 			expected: []string{prowJobIndexKeyAll},
 		},
 		{
 			name:     "Changing name changes notCompletedByName index",
 			modify:   func(pj *prowv1.ProwJob) { pj.Spec.Job = "some-name" },
-			expected: []string{prowJobIndexKeyAll, prowJobIndexKeyNotCompleted, prowJobIndexKeyNotCompletedByName("some-name")},
+			expected: []string{prowJobIndexKeyAll, prowJobIndexKeyPending, pendingTriggeredIndexKeyByName("some-name")},
 		},
 	}
 
@@ -371,7 +379,7 @@ func TestMaxConcurrencyConsidersCacheStaleness(t *testing.T) {
 		}}}}
 	}
 
-	r := newReconciler(pjClient, nil, cfg, "")
+	r := newReconciler(context.Background(), pjClient, nil, cfg, "")
 	r.buildClients = map[string]ctrlruntimeclient.Client{pja.Spec.Cluster: fakectrlruntimeclient.NewFakeClient()}
 
 	wg := &sync.WaitGroup{}
@@ -451,16 +459,6 @@ func (ecc *eventuallyConsistentClient) Create(ctx context.Context, obj runtime.O
 	return nil
 }
 
-func TestTerminateDupesToleratesNotFound(t *testing.T) {
-	r := &reconciler{
-		buildClients: map[string]ctrlruntimeclient.Client{"default": fakectrlruntimeclient.NewFakeClient()},
-		config:       func() *config.Config { return &config.Config{} },
-	}
-	if err := r.terminateDupesCleanup(prowv1.ProwJob{}); err != nil {
-		t.Errorf("expected no error when deleting absent pod, got %v", err)
-	}
-}
-
 func TestStartPodBlocksUntilItHasThePodInCache(t *testing.T) {
 	t.Parallel()
 	r := &reconciler{
@@ -469,6 +467,7 @@ func TestStartPodBlocksUntilItHasThePodInCache(t *testing.T) {
 		config:       func() *config.Config { return &config.Config{} },
 	}
 	pj := &prowv1.ProwJob{
+		ObjectMeta: metav1.ObjectMeta{Name: "name"},
 		Spec: prowv1.ProwJobSpec{
 			PodSpec: &corev1.PodSpec{Containers: []corev1.Container{{}}},
 			Refs:    &prowv1.Refs{},
@@ -478,7 +477,7 @@ func TestStartPodBlocksUntilItHasThePodInCache(t *testing.T) {
 	if _, _, err := r.startPod(pj); err != nil {
 		t.Fatalf("startPod: %v", err)
 	}
-	if err := r.buildClients["default"].Get(context.Background(), types.NamespacedName{}, &corev1.Pod{}); err != nil {
+	if err := r.buildClients["default"].Get(context.Background(), types.NamespacedName{Name: "name"}, &corev1.Pod{}); err != nil {
 		t.Errorf("couldn't get pod, this likely means startPod didn't block: %v", err)
 	}
 }

@@ -177,7 +177,7 @@ func NewAgent(configAgent *config.Agent, pluginConfigAgent *ConfigAgent, clientA
 		GitClient:                 clientAgent.GitClient,
 		SlackClient:               clientAgent.SlackClient,
 		OwnersClient:              clientAgent.OwnersClient.WithFields(logger.Data).WithGitHubClient(gitHubClient),
-		BugzillaClient:            clientAgent.BugzillaClient,
+		BugzillaClient:            clientAgent.BugzillaClient.WithFields(logger.Data).ForPlugin(plugin),
 		Metrics:                   metrics,
 		Config:                    prowConfig,
 		PluginConfig:              pluginConfig,
@@ -238,8 +238,6 @@ func (pa *ConfigAgent) Load(path string, checkUnknownPlugins bool) error {
 	if err := yaml.Unmarshal(b, np); err != nil {
 		return err
 	}
-
-	np.ApplyDefaults()
 
 	if err := np.Validate(); err != nil {
 		return err

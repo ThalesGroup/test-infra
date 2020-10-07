@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -35,6 +36,7 @@ import (
 	prowflagutil "k8s.io/test-infra/prow/flagutil"
 	"k8s.io/test-infra/prow/interrupts"
 	"k8s.io/test-infra/prow/logrusutil"
+	"k8s.io/test-infra/prow/metrics"
 	"k8s.io/test-infra/prow/pjutil"
 )
 
@@ -97,6 +99,9 @@ func main() {
 	// start a cron
 	cr := cron.New()
 	cr.Start()
+
+	metrics.ExposeMetrics("horologium", configAgent.Config().PushGateway, o.instrumentationOptions.MetricsPort)
+
 	interrupts.TickLiteral(func() {
 		start := time.Now()
 		if err := sync(prowJobClient, configAgent.Config(), cr, start); err != nil {
@@ -107,8 +112,8 @@ func main() {
 }
 
 type prowJobClient interface {
-	Create(*prowapi.ProwJob) (*prowapi.ProwJob, error)
-	List(opts metav1.ListOptions) (*prowapi.ProwJobList, error)
+	Create(context.Context, *prowapi.ProwJob, metav1.CreateOptions) (*prowapi.ProwJob, error)
+	List(context.Context, metav1.ListOptions) (*prowapi.ProwJobList, error)
 }
 
 type cronClient interface {
@@ -117,7 +122,7 @@ type cronClient interface {
 }
 
 func sync(prowJobClient prowJobClient, cfg *config.Config, cr cronClient, now time.Time) error {
-	jobs, err := prowJobClient.List(metav1.ListOptions{LabelSelector: labels.Everything().String()})
+	jobs, err := prowJobClient.List(context.TODO(), metav1.ListOptions{LabelSelector: labels.Everything().String()})
 	if err != nil {
 		return fmt.Errorf("error listing prow jobs: %v", err)
 	}
@@ -146,7 +151,7 @@ func sync(prowJobClient prowJobClient, cfg *config.Config, cr cronClient, now ti
 			if !previousFound || shouldTrigger {
 				prowJob := pjutil.NewProwJob(pjutil.PeriodicSpec(p), p.Labels, p.Annotations)
 				logger.WithFields(pjutil.ProwJobFields(&prowJob)).Info("Triggering new run of interval periodic.")
-				if _, err := prowJobClient.Create(&prowJob); err != nil {
+				if _, err := prowJobClient.Create(context.TODO(), &prowJob, metav1.CreateOptions{}); err != nil {
 					errs = append(errs, err)
 				}
 			}
@@ -156,7 +161,7 @@ func sync(prowJobClient prowJobClient, cfg *config.Config, cr cronClient, now ti
 			if !previousFound || shouldTrigger {
 				prowJob := pjutil.NewProwJob(pjutil.PeriodicSpec(p), p.Labels, p.Annotations)
 				logger.WithFields(pjutil.ProwJobFields(&prowJob)).Info("Triggering new run of cron periodic.")
-				if _, err := prowJobClient.Create(&prowJob); err != nil {
+				if _, err := prowJobClient.Create(context.TODO(), &prowJob, metav1.CreateOptions{}); err != nil {
 					errs = append(errs, err)
 				}
 			} else {

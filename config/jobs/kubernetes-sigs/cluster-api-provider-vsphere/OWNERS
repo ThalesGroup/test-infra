@@ -1,12 +1,13 @@
 # See the OWNERS docs at https://go.k8s.io/owners
 
-reviwers:
+reviewers:
   - sig-cluster-lifecycle-leads
   - provider-vmware
   - cluster-api-admins
   - cluster-api-vsphere-maintainers
   - figo
   - akutz
+  - ncdc
 approvers:
   - sig-cluster-lifecycle-leads
   - provider-vmware
@@ -14,3 +15,4 @@ approvers:
   - cluster-api-vsphere-maintainers
   - figo
   - akutz
+  - ncdc

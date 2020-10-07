@@ -12,7 +12,7 @@ presubmits:
       preset-kind-volume-mounts: "true"
     spec:
       containers:
-      - image: gcr.io/k8s-testimages/kubekins-e2e:v20200623-2424179-master
+      - image: gcr.io/k8s-testimages/kubekins-e2e:v20201005-0b243c0-master
         command:
         - runner.sh
         args:
@@ -32,7 +32,7 @@ presubmits:
       preset-kind-volume-mounts: "true"
     spec:
       containers:
-      - image: gcr.io/k8s-testimages/kubekins-e2e:v20200623-2424179-master
+      - image: gcr.io/k8s-testimages/kubekins-e2e:v20201005-0b243c0-master
         command:
         - runner.sh
         args:
@@ -41,6 +41,28 @@ presubmits:
     annotations:
       testgrid-dashboards: sig-network-ingress-controller-conformance
       testgrid-tab-name: verify-codegen
+
+  - name: pull-ingress-controller-conformance-gherkin
+    always_run: true
+    decorate: true
+    decoration_config:
+      timeout: 10m
+    path_alias: sigs.k8s.io/ingress-controller-conformance
+    labels:
+      preset-dind-enabled: "true"
+      preset-kind-volume-mounts: "true"
+    spec:
+      containers:
+      - image: gcr.io/k8s-testimages/kubekins-e2e:v20201005-0b243c0-master
+        command:
+        - runner.sh
+        args:
+        - bash
+        - -c
+        - pip3 install reformat-gherkin==2.0.0 --ignore-installed PyYAML && make verify-gherkin
+    annotations:
+      testgrid-dashboards: sig-network-ingress-controller-conformance
+      testgrid-tab-name: verify-gherkin
 
   - name: pull-ingress-controller-conformance-gofmt
     always_run: true
@@ -51,7 +73,7 @@ presubmits:
       preset-kind-volume-mounts: "true"
     spec:
       containers:
-      - image: gcr.io/k8s-testimages/kubekins-e2e:v20200623-2424179-master
+      - image: gcr.io/k8s-testimages/kubekins-e2e:v20201005-0b243c0-master
         command:
         - runner.sh
         args:
@@ -71,7 +93,7 @@ presubmits:
       preset-kind-volume-mounts: "true"
     spec:
       containers:
-      - image: gcr.io/k8s-testimages/kubekins-e2e:v20200623-2424179-master
+      - image: gcr.io/k8s-testimages/kubekins-e2e:v20201005-0b243c0-master
         command:
         - runner.sh
         args:
@@ -91,7 +113,7 @@ presubmits:
       preset-kind-volume-mounts: "true"
     spec:
       containers:
-      - image: gcr.io/k8s-testimages/kubekins-e2e:v20200623-2424179-master
+      - image: gcr.io/k8s-testimages/kubekins-e2e:v20201005-0b243c0-master
         command:
         - runner.sh
         args:

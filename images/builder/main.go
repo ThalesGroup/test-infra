@@ -25,6 +25,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -66,7 +67,15 @@ func getImageName(o options, tag string, config string) (string, error) {
 	if err := yaml.Unmarshal(buf, &cloudbuildyamlFile); err != nil {
 		return "", fmt.Errorf("failed to get image name: %v", err)
 	}
-	var projectID, _ = getProjectID()
+	projectID := o.project
+	// if projectID wasn't set explicitly, discover it
+	if projectID == "" {
+		p, err := getProjectID()
+		if err != nil {
+			return "", err
+		}
+		projectID = p
+	}
 	var imageNames = cloudbuildyamlFile.Images
 	r := strings.NewReplacer("$PROJECT_ID", strings.TrimSpace(projectID), "$_GIT_TAG", tag, "$_CONFIG", config)
 	var result string
@@ -89,8 +98,13 @@ func getVersion() (string, error) {
 	if err != nil {
 		return "", err
 	}
+	validTagRegexp, err := regexp.Compile("[^-_.a-zA-Z0-9]+")
+	if err != nil {
+		return "", err
+	}
+	sanitizedOutput := validTagRegexp.ReplaceAllString(string(output), "")
 	t := time.Now().Format("20060102")
-	return fmt.Sprintf("v%s-%s", t, strings.TrimSpace(string(output))), nil
+	return fmt.Sprintf("v%s-%s", t, sanitizedOutput), nil
 }
 
 func (o *options) validateConfigDir() error {

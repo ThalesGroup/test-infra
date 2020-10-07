@@ -14,7 +14,7 @@ presubmits:
       preset-dind-enabled: "true"
     spec:
       containers:
-      - image: gcr.io/k8s-testimages/kubekins-e2e:v20200623-2424179-master
+      - image: gcr.io/k8s-testimages/kubekins-e2e:v20201005-0b243c0-master
         command:
         - runner.sh
         - kubetest
@@ -31,7 +31,7 @@ presubmits:
         - --aksengine-agentpoolcount=2
         - --aksengine-admin-username=azureuser
         - --aksengine-creds=$(AZURE_CREDENTIALS)
-        - --aksengine-orchestratorRelease=1.18
+        - --aksengine-orchestratorRelease=1.19
         - --aksengine-mastervmsize=Standard_DS2_v2
         - --aksengine-agentvmsize=Standard_DS2_v2
         - --aksengine-deploy-custom-k8s
@@ -69,7 +69,7 @@ presubmits:
       path_alias: sigs.k8s.io/azuredisk-csi-driver
     spec:
       containers:
-      - image: gcr.io/k8s-testimages/kubekins-e2e:v20200623-2424179-master
+      - image: gcr.io/k8s-testimages/kubekins-e2e:v20201005-0b243c0-master
         command:
         - runner.sh
         - kubetest
@@ -85,7 +85,7 @@ presubmits:
         - --deployment=aksengine
         - --aksengine-admin-username=azureuser
         - --aksengine-creds=$(AZURE_CREDENTIALS)
-        - --aksengine-orchestratorRelease=1.18
+        - --aksengine-orchestratorRelease=1.19
         - --aksengine-deploy-custom-k8s
         - --aksengine-location=westus2
         - --aksengine-public-key=$(AZURE_SSH_PUBLIC_KEY_FILE)
@@ -124,7 +124,7 @@ presubmits:
       path_alias: sigs.k8s.io/azuredisk-csi-driver
     spec:
       containers:
-      - image: gcr.io/k8s-testimages/kubekins-e2e:v20200623-2424179-master
+      - image: gcr.io/k8s-testimages/kubekins-e2e:v20201005-0b243c0-master
         command:
         - runner.sh
         - kubetest
@@ -140,7 +140,7 @@ presubmits:
         - --deployment=aksengine
         - --aksengine-admin-username=azureuser
         - --aksengine-creds=$(AZURE_CREDENTIALS)
-        - --aksengine-orchestratorRelease=1.18
+        - --aksengine-orchestratorRelease=1.19
         - --aksengine-deploy-custom-k8s
         - --aksengine-location=westus2
         - --aksengine-public-key=$(AZURE_SSH_PUBLIC_KEY_FILE)
@@ -181,7 +181,7 @@ presubmits:
       path_alias: sigs.k8s.io/azurefile-csi-driver
     spec:
       containers:
-      - image: gcr.io/k8s-testimages/kubekins-e2e:v20200623-2424179-master
+      - image: gcr.io/k8s-testimages/kubekins-e2e:v20201005-0b243c0-master
         command:
         - runner.sh
         - kubetest
@@ -198,7 +198,7 @@ presubmits:
         - --aksengine-agentpoolcount=2
         - --aksengine-admin-username=azureuser
         - --aksengine-creds=$(AZURE_CREDENTIALS)
-        - --aksengine-orchestratorRelease=1.18
+        - --aksengine-orchestratorRelease=1.19
         - --aksengine-mastervmsize=Standard_DS2_v2
         - --aksengine-agentvmsize=Standard_DS2_v2
         - --aksengine-deploy-custom-k8s
@@ -234,7 +234,7 @@ periodics:
     path_alias: k8s.io/kubernetes
   spec:
     containers:
-    - image: gcr.io/k8s-testimages/kubekins-e2e:v20200623-2424179-master
+    - image: gcr.io/k8s-testimages/kubekins-e2e:v20201005-0b243c0-master
       command:
       - runner.sh
       - kubetest
@@ -251,7 +251,7 @@ periodics:
       - --aksengine-agentpoolcount=2
       - --aksengine-admin-username=azureuser
       - --aksengine-creds=$(AZURE_CREDENTIALS)
-      - --aksengine-orchestratorRelease=1.18
+      - --aksengine-orchestratorRelease=1.19
       - --aksengine-mastervmsize=Standard_DS2_v2
       - --aksengine-agentvmsize=Standard_DS2_v2
       - --aksengine-deploy-custom-k8s
@@ -291,7 +291,7 @@ periodics:
     path_alias: k8s.io/kubernetes
   spec:
     containers:
-    - image: gcr.io/k8s-testimages/kubekins-e2e:v20200623-2424179-master
+    - image: gcr.io/k8s-testimages/kubekins-e2e:v20201005-0b243c0-master
       command:
       - "runner.sh"
       - "./scripts/ci-entrypoint.sh"
@@ -336,7 +336,7 @@ periodics:
     path_alias: k8s.io/kubernetes
   spec:
     containers:
-    - image: gcr.io/k8s-testimages/kubekins-e2e:v20200623-2424179-master
+    - image: gcr.io/k8s-testimages/kubekins-e2e:v20201005-0b243c0-master
       command:
       - "runner.sh"
       - "./scripts/ci-entrypoint.sh"
@@ -349,7 +349,7 @@ periodics:
         value: "true"
       - name: USE_CI_ARTIFACTS
         value: "true"
-      - name: FEATURE_GATE_MACHINE_POOL
+      - name: EXP_MACHINE_POOL
         value: "true"
       securityContext:
         privileged: true

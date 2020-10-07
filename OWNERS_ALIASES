@@ -4,9 +4,10 @@ aliases:
   - BenTheElder
   - chases2
   - cjwagner
-  - clarketm
+  - e-blackwelder
   - fejta
   - michelle192837
+  - chaodaiG
 
   wg-k8s-infra-oncall:
   - BenTheElder
@@ -56,11 +57,11 @@ aliases:
     - mrbobbytables
     - nikhita
   sig-docs-leads:
+    - irvifa
     - jimangel
     - kbarnard10
     - kbhawkey
     - sftim
-    - zacharysarah
   sig-instrumentation-leads:
     - brancz
     - ehashman
@@ -75,14 +76,10 @@ aliases:
   sig-node-leads:
     - dchen1107
     - derekwaynecarr
-  sig-pm-leads:
-    - calebamiles
-    - jdumars
-    - justaugustus
-    - lachie83
   sig-release-leads:
-    - calebamiles
+    - alejandrox1
     - justaugustus
+    - saschagrunert
     - tpepper
   sig-scalability-leads:
     - mm4tt
@@ -168,10 +165,10 @@ aliases:
     - phenixblue
   committee-code-of-conduct:
     - AevaOnline
-    - Bradamant3
-    - carolynvs
-    - jdumars
+    - celestehorgan
+    - karenhchu
     - tashimi
+    - tpepper
   committee-product-security:
     - cjcullen
     - joelsmith

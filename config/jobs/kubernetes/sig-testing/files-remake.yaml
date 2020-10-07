@@ -3,7 +3,9 @@ presubmits:
   - name: pull-kubernetes-files-remake
     path_alias: "k8s.io/kubernetes"
     decorate: true
-    always_run: true
+    optional: true
+    run_if_changed: 'Makefile.generated_files|make-rules'
+    always_run: false
     skip_report: false
     # branched per release (older go versions)
     skip_branches:
@@ -18,10 +20,17 @@ presubmits:
       - name: main
         command:
         - make
-        image: gcr.io/k8s-testimages/kubekins-e2e:v20200623-2424179-master
+        image: gcr.io/k8s-testimages/kubekins-e2e:v20201005-0b243c0-master
         args:
         - verify
         env:
         # Space separated list of the checks to run
         - name: WHAT
           value: generated-files-remake
+        resources:
+          limits:
+            cpu: 1500m
+            memory: 7Gi
+          requests:
+            cpu: 1500m
+            memory: 7Gi

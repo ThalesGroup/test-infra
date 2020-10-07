@@ -23,6 +23,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"text/template"
@@ -216,6 +217,17 @@ deck:
 `,
 			expectError: true,
 		},
+		{
+			name: "Invalid Spyglass gcs browser web prefix",
+			spyglassConfig: `
+deck:
+  spyglass:
+    gcs_browser_prefix: https://gcsweb.k8s.io/gcs/
+    gcs_browser_prefixes:
+      '*': https://gcsweb.k8s.io/gcs/
+`,
+			expectError: true,
+		},
 	}
 	for _, tc := range testCases {
 		// save the config
@@ -279,6 +291,49 @@ deck:
 		}
 	}
 
+}
+
+func TestGetGCSBrowserPrefix(t *testing.T) {
+	testCases := []struct {
+		id       string
+		config   Spyglass
+		expected string
+	}{
+		{
+			id: "only default",
+			config: Spyglass{
+				GCSBrowserPrefixes: map[string]string{
+					"*": "https://default.com/gcs/",
+				},
+			},
+			expected: "https://default.com/gcs/",
+		},
+		{
+			id: "org exists",
+			config: Spyglass{
+				GCSBrowserPrefixes: map[string]string{
+					"org": "https://org.com/gcs/",
+				},
+			},
+			expected: "https://org.com/gcs/",
+		},
+		{
+			id: "repo exists",
+			config: Spyglass{
+				GCSBrowserPrefixes: map[string]string{
+					"org/repo": "https://repo.com/gcs/",
+				},
+			},
+			expected: "https://repo.com/gcs/",
+		},
+	}
+
+	for _, tc := range testCases {
+		actual := tc.config.GCSBrowserPrefixes.GetGCSBrowserPrefix("org", "repo")
+		if !reflect.DeepEqual(actual, tc.expected) {
+			t.Fatalf("%s", cmp.Diff(tc.expected, actual))
+		}
+	}
 }
 
 func TestDecorationRawYaml(t *testing.T) {
@@ -818,7 +873,7 @@ func TestValidatePodSpec(t *testing.T) {
 			name: "reject reserved mount name",
 			spec: func(s *v1.PodSpec) {
 				s.Containers[0].VolumeMounts = append(s.Containers[0].VolumeMounts, v1.VolumeMount{
-					Name:      decorate.VolumeMounts()[0],
+					Name:      decorate.VolumeMounts().List()[0],
 					MountPath: "/whatever",
 				})
 			},
@@ -828,7 +883,7 @@ func TestValidatePodSpec(t *testing.T) {
 			spec: func(s *v1.PodSpec) {
 				s.Containers[0].VolumeMounts = append(s.Containers[0].VolumeMounts, v1.VolumeMount{
 					Name:      "fun",
-					MountPath: decorate.VolumeMountPaths()[0],
+					MountPath: decorate.VolumeMountPaths().List()[0],
 				})
 			},
 		},
@@ -837,7 +892,7 @@ func TestValidatePodSpec(t *testing.T) {
 			spec: func(s *v1.PodSpec) {
 				s.Containers[0].VolumeMounts = append(s.Containers[0].VolumeMounts, v1.VolumeMount{
 					Name:      "foo",
-					MountPath: filepath.Dir(decorate.VolumeMountPaths()[0]),
+					MountPath: filepath.Dir(decorate.VolumeMountPaths().List()[0]),
 				})
 			},
 		},
@@ -846,14 +901,14 @@ func TestValidatePodSpec(t *testing.T) {
 			spec: func(s *v1.PodSpec) {
 				s.Containers[0].VolumeMounts = append(s.Containers[0].VolumeMounts, v1.VolumeMount{
 					Name:      "foo",
-					MountPath: filepath.Join(decorate.VolumeMountPaths()[0], "extra"),
+					MountPath: filepath.Join(decorate.VolumeMountPaths().List()[0], "extra"),
 				})
 			},
 		},
 		{
 			name: "reject reserved volume",
 			spec: func(s *v1.PodSpec) {
-				s.Volumes = append(s.Volumes, v1.Volume{Name: decorate.VolumeMounts()[0]})
+				s.Volumes = append(s.Volumes, v1.Volume{Name: decorate.VolumeMounts().List()[0]})
 			},
 		},
 		{
@@ -896,7 +951,7 @@ func TestValidatePodSpec(t *testing.T) {
 			} else if tc.spec != nil {
 				tc.spec(current)
 			}
-			switch err := validatePodSpec(jt, current); {
+			switch err := validatePodSpec(jt, current, true); {
 			case err == nil && !tc.pass:
 				t.Error("validation failed to raise an error")
 			case err != nil && tc.pass:
@@ -1148,6 +1203,133 @@ func TestValidateLabels(t *testing.T) {
 	}
 }
 
+func TestValidateMultipleContainers(t *testing.T) {
+	ka := string(prowjobv1.KubernetesAgent)
+	yes := true
+	defCfg := prowapi.DecorationConfig{
+		UtilityImages: &prowjobv1.UtilityImages{
+			CloneRefs:  "clone-me",
+			InitUpload: "upload-me",
+			Entrypoint: "enter-me",
+			Sidecar:    "official-drink-of-the-org",
+		},
+		GCSCredentialsSecret: "upload-secret",
+		GCSConfiguration: &prowjobv1.GCSConfiguration{
+			PathStrategy: prowjobv1.PathStrategyExplicit,
+			DefaultOrg:   "so-org",
+			DefaultRepo:  "very-repo",
+		},
+	}
+	goodSpec := v1.PodSpec{
+		Containers: []v1.Container{
+			{
+				Name:    "test1",
+				Command: []string{"hello", "world"},
+			},
+			{
+				Name: "test2",
+				Args: []string{"hello", "world"},
+			},
+		},
+	}
+	ns := "target-namespace"
+	cases := []struct {
+		name string
+		base JobBase
+		pass bool
+	}{
+		{
+			name: "valid kubernetes job with multiple containers",
+			base: JobBase{
+				Name:          "name",
+				Agent:         ka,
+				UtilityConfig: UtilityConfig{Decorate: &yes, DecorationConfig: &defCfg},
+				Spec:          &goodSpec,
+				Namespace:     &ns,
+			},
+			pass: true,
+		},
+		{
+			name: "invalid: containers with no cmd or args",
+			base: JobBase{
+				Name:          "name",
+				Agent:         ka,
+				UtilityConfig: UtilityConfig{Decorate: &yes, DecorationConfig: &defCfg},
+				Spec: &v1.PodSpec{
+					Containers: []v1.Container{
+						{
+							Name: "test1",
+						},
+						{
+							Name: "test2",
+						},
+					},
+				},
+				Namespace: &ns,
+			},
+		},
+		{
+			name: "invalid: containers with no names",
+			base: JobBase{
+				Name:          "name",
+				Agent:         ka,
+				UtilityConfig: UtilityConfig{Decorate: &yes, DecorationConfig: &defCfg},
+				Spec: &v1.PodSpec{
+					Containers: []v1.Container{
+						{
+							Command: []string{"hello", "world"},
+						},
+						{
+							Args: []string{"hello", "world"},
+						},
+					},
+				},
+				Namespace: &ns,
+			},
+		},
+		{
+			name: "invalid: no decoration enabled",
+			base: JobBase{
+				Name:      "name",
+				Agent:     ka,
+				Spec:      &goodSpec,
+				Namespace: &ns,
+			},
+		},
+		{
+			name: "invalid: container names reserved for decoration",
+			base: JobBase{
+				Name:          "name",
+				Agent:         ka,
+				UtilityConfig: UtilityConfig{Decorate: &yes, DecorationConfig: &defCfg},
+				Spec: &v1.PodSpec{
+					Containers: []v1.Container{
+						{
+							Name:    "place-entrypoint",
+							Command: []string{"hello", "world"},
+						},
+						{
+							Name: "sidecar",
+							Args: []string{"hello", "world"},
+						},
+					},
+				}, Namespace: &ns,
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			switch err := validateJobBase(tc.base, prowjobv1.PresubmitJob, ns); {
+			case err == nil && !tc.pass:
+				t.Error("validation failed to raise an error")
+			case err != nil && tc.pass:
+				t.Errorf("validation should have passed, got: %v", err)
+			}
+		})
+	}
+}
+
 func TestValidateJobBase(t *testing.T) {
 	ka := string(prowjobv1.KubernetesAgent)
 	ja := string(prowjobv1.JenkinsAgent)
@@ -1263,6 +1445,53 @@ func TestValidateJobBase(t *testing.T) {
 				t.Error("validation failed to raise an error")
 			case err != nil && tc.pass:
 				t.Errorf("validation should have passed, got: %v", err)
+			}
+		})
+	}
+}
+
+func TestValidateDeck(t *testing.T) {
+	boolTrue := true
+	boolFalse := false
+	cases := []struct {
+		name        string
+		deck        Deck
+		expectedErr string
+	}{
+		{
+			name:        "empty Deck is valid",
+			deck:        Deck{},
+			expectedErr: "",
+		},
+		{
+			name:        "AdditionalAllowedBuckets has items, SkipStoragePathValidation is false => no errors",
+			deck:        Deck{SkipStoragePathValidation: &boolFalse, AdditionalAllowedBuckets: []string{"foo", "bar", "batz"}},
+			expectedErr: "",
+		},
+		{
+			name:        "AdditionalAllowedBuckets has items, SkipStoragePathValidation is default value => error",
+			deck:        Deck{AdditionalAllowedBuckets: []string{"hello", "world"}},
+			expectedErr: "skip_storage_path_validation is enabled",
+		},
+		{
+			name:        "AdditionalAllowedBuckets has items, SkipStoragePathValidation is true => error",
+			deck:        Deck{SkipStoragePathValidation: &boolTrue, AdditionalAllowedBuckets: []string{"hello", "world"}},
+			expectedErr: "skip_storage_path_validation is enabled",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			expectingErr := len(tc.expectedErr) > 0
+			err := tc.deck.Validate()
+			if expectingErr && err == nil {
+				t.Fatalf("expecting error (%v), but did not get an error", tc.expectedErr)
+			}
+			if !expectingErr && err != nil {
+				t.Fatalf("not expecting error, but got an error: %v", err)
+			}
+			if expectingErr && err != nil && !strings.Contains(err.Error(), tc.expectedErr) {
+				t.Fatalf("expected error (%v), but got unknown error, instead: %v", tc.expectedErr, err)
 			}
 		})
 	}
@@ -2726,6 +2955,11 @@ func TestPlankJobURLPrefix(t *testing.T) {
 			refs:                 &prowapi.Refs{Org: "my-alternate-org", Repo: "my-second-repo"},
 			expectedJobURLPrefix: "https://my-prow",
 		},
+		{
+			name:                 "gcs/ suffix in JobURLPrefix will be automatically trimmed",
+			plank:                Plank{JobURLPrefixConfig: map[string]string{"*": "https://my-prow/view/gcs/"}},
+			expectedJobURLPrefix: "https://my-prow/view/",
+		},
 	}
 
 	for _, tc := range testCases {
@@ -2738,6 +2972,8 @@ func TestPlankJobURLPrefix(t *testing.T) {
 }
 
 func TestValidateComponentConfig(t *testing.T) {
+	boolTrue := true
+	boolFalse := false
 	testCases := []struct {
 		name        string
 		config      *Config
@@ -2858,6 +3094,36 @@ func TestValidateComponentConfig(t *testing.T) {
 				},
 			}}},
 			errExpected: true,
+		},
+		{
+			name: "SkipStoragePathValidation true and AdditionalAllowedBuckets empty, no err",
+			config: &Config{ProwConfig: ProwConfig{Deck: Deck{
+				SkipStoragePathValidation: &boolTrue,
+				AdditionalAllowedBuckets:  []string{},
+			}}},
+			errExpected: false,
+		},
+		{
+			name: "SkipStoragePathValidation true and AdditionalAllowedBuckets non-empty, err",
+			config: &Config{ProwConfig: ProwConfig{Deck: Deck{
+				SkipStoragePathValidation: &boolTrue,
+				AdditionalAllowedBuckets: []string{
+					"foo",
+					"bar",
+				},
+			}}},
+			errExpected: true,
+		},
+		{
+			name: "SkipStoragePathValidation false and AdditionalAllowedBuckets non-empty, no err",
+			config: &Config{ProwConfig: ProwConfig{Deck: Deck{
+				SkipStoragePathValidation: &boolFalse,
+				AdditionalAllowedBuckets: []string{
+					"foo",
+					"bar",
+				},
+			}}},
+			errExpected: false,
 		},
 	}
 
@@ -4671,4 +4937,104 @@ func TestValidatePostsubmits(t *testing.T) {
 			t.Errorf("expected error '%s', got error '%s'", tc.expectedError, errMsg)
 		}
 	}
+}
+
+func TestValidateStorageBucket(t *testing.T) {
+	testCases := []struct {
+		name        string
+		yaml        string
+		bucket      string
+		expectedErr string
+	}{
+		{
+			name:        "unspecified config means no validation",
+			yaml:        ``,
+			bucket:      "who-knows",
+			expectedErr: "",
+		},
+		{
+			name: "validation disabled",
+			yaml: `
+deck:
+    skip_storage_path_validation: true`,
+			bucket:      "random-unknown-bucket",
+			expectedErr: "",
+		},
+		{
+			name: "validation enabled",
+			yaml: `
+deck:
+    skip_storage_path_validation: false`,
+			bucket:      "random-unknown-bucket",
+			expectedErr: "bucket \"random-unknown-bucket\" not in allowed list",
+		},
+		{
+			name: "DecorationConfig allowed bucket",
+			yaml: `
+deck:
+    skip_storage_path_validation: false
+plank:
+    default_decoration_configs:
+        '*':
+            gcs_configuration:
+                bucket: "kubernetes-jenkins"`,
+			bucket:      "kubernetes-jenkins",
+			expectedErr: "",
+		},
+		{
+			name: "custom allowed bucket",
+			yaml: `
+deck:
+    skip_storage_path_validation: false
+    additional_allowed_buckets:
+    - "kubernetes-prow"`,
+			bucket:      "kubernetes-prow",
+			expectedErr: "",
+		},
+		{
+			name: "unknown bucket path",
+			yaml: `
+deck:
+    skip_storage_path_validation: false`,
+			bucket:      "istio-prow",
+			expectedErr: "bucket \"istio-prow\" not in allowed list",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(nested *testing.T) {
+			cfg, err := loadConfigYaml(tc.yaml, nested)
+			if err != nil {
+				nested.Fatalf("failed to load prow config: err=%v\nYAML=%v", err, tc.yaml)
+			}
+			expectingErr := len(tc.expectedErr) > 0
+
+			err = cfg.ValidateStorageBucket(tc.bucket)
+
+			if expectingErr && err == nil {
+				nested.Fatalf("no errors, but was expecting error: %v", tc.expectedErr)
+			}
+			if err != nil && !expectingErr {
+				nested.Fatalf("expecting no errors, but got: %v", err)
+			}
+			if expectingErr && err != nil && !strings.Contains(err.Error(), tc.expectedErr) {
+				nested.Fatalf("expecting error substring \"%v\", but got error: %v", tc.expectedErr, err)
+			}
+		})
+	}
+}
+
+func loadConfigYaml(prowConfigYaml string, t *testing.T) (*Config, error) {
+	prowConfigDir, err := ioutil.TempDir("", "prowConfig")
+	if err != nil {
+		t.Fatalf("fail to make tempdir: %v", err)
+	}
+	defer os.RemoveAll(prowConfigDir)
+
+	prowConfig := filepath.Join(prowConfigDir, "config.yaml")
+	if err := ioutil.WriteFile(prowConfig, []byte(prowConfigYaml), 0666); err != nil {
+		t.Fatalf("fail to write prow config: %v", err)
+	}
+
+	return Load(prowConfig, "")
 }

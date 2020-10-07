@@ -28,11 +28,14 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 	"testing"
 	"time"
 
 	coreapi "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 
@@ -814,7 +817,6 @@ func checkScenarioArgs(jobName, imageName string, args []string) error {
 	extracts := hasArg("--extract=", args)
 	sharedBuilds := hasArg("--use-shared-build", args)
 	nodeE2e := hasArg("--deployment=node", args)
-	localE2e := hasArg("--deployment=local", args)
 	builds := hasArg("--build", args)
 
 	if sharedBuilds && extracts {
@@ -852,25 +854,6 @@ func checkScenarioArgs(jobName, imageName string, args []string) error {
 
 	if hasArg("--image-family", args) != hasArg("--image-project", args) {
 		return fmt.Errorf("e2e jobs %s should have both --image-family and --image-project, or none of them", jobName)
-	}
-
-	if strings.HasPrefix(jobName, "pull-kubernetes-") &&
-		!nodeE2e &&
-		!localE2e &&
-		!strings.Contains(jobName, "kubeadm") {
-		stage := "gs://kubernetes-release-pull/ci/" + jobName
-		if strings.Contains(jobName, "gke") {
-			stage = "gs://kubernetes-release-dev/ci"
-			if !hasArg("--stage-suffix="+jobName, args) {
-				return fmt.Errorf("presubmit gke jobs %s - need to have --stage-suffix=%s", jobName, jobName)
-			}
-		}
-
-		if !sharedBuilds {
-			if !hasArg("--stage="+stage, args) {
-				return fmt.Errorf("presubmit jobs %s - need to stage to %s", jobName, stage)
-			}
-		}
 	}
 
 	// test_args should not have double slashes on ginkgo flags
@@ -943,6 +926,219 @@ func TestValidScenarioArgs(t *testing.T) {
 		if job.Spec != nil && !cfg.ShouldDecorate(&c.JobConfig, job.JobBase.UtilityConfig) {
 			if err := checkScenarioArgs(job.Name, job.Spec.Containers[0].Image, job.Spec.Containers[0].Args); err != nil {
 				t.Errorf("Invalid Scenario Args : %s", err)
+			}
+		}
+	}
+}
+
+func allStaticJobs() []cfg.JobBase {
+	jobs := []cfg.JobBase{}
+	for _, job := range c.AllStaticPresubmits(nil) {
+		jobs = append(jobs, job.JobBase)
+	}
+	for _, job := range c.AllStaticPostsubmits(nil) {
+		jobs = append(jobs, job.JobBase)
+	}
+	for _, job := range c.AllPeriodics() {
+		jobs = append(jobs, job.JobBase)
+	}
+	sort.Slice(jobs, func(i, j int) bool {
+		return jobs[i].Name < jobs[j].Name
+	})
+	return jobs
+}
+
+func verifyPodQOSGuaranteed(spec *coreapi.PodSpec) (errs []error) {
+	resourceNames := []coreapi.ResourceName{
+		coreapi.ResourceCPU,
+		coreapi.ResourceMemory,
+	}
+	zero := resource.MustParse("0")
+	for _, c := range spec.Containers {
+		for _, r := range resourceNames {
+			limit, ok := c.Resources.Limits[r]
+			if !ok {
+				errs = append(errs, fmt.Errorf("container '%v' should have resources.limits[%v] specified", c.Name, r))
+			}
+			request, ok := c.Resources.Requests[r]
+			if !ok {
+				errs = append(errs, fmt.Errorf("container '%v' should have resources.requests[%v] specified", c.Name, r))
+			}
+			if limit.Cmp(zero) == 0 {
+				errs = append(errs, fmt.Errorf("container '%v' resources.limits[%v] should be non-zero", c.Name, r))
+			} else if limit.Cmp(request) != 0 {
+				errs = append(errs, fmt.Errorf("container '%v' resources.limits[%v] (%v) should match request (%v)", c.Name, r, limit.String(), request.String()))
+			}
+		}
+	}
+	return errs
+}
+
+// isPodQOSGuaranteed returns true if the PodSpec's containers have non-zero
+// resource limits that are equal to their resource requests
+func isPodQOSGuaranteed(spec *coreapi.PodSpec) bool {
+	return len(verifyPodQOSGuaranteed(spec)) == 0
+}
+
+// A job is merge-blocking if it:
+// - is not optional
+// - reports (aka does not skip reporting)
+// - always runs OR runs if some path changed
+func isMergeBlocking(job cfg.Presubmit) bool {
+	return !job.Optional && !job.SkipReport && (job.AlwaysRun || job.RunIfChanged != "")
+}
+
+func isKubernetesReleaseBlocking(job cfg.JobBase) bool {
+	re := regexp.MustCompile(`sig-release-(1.[0-9]{2}|master)-blocking`)
+	dashboards, ok := job.Annotations["testgrid-dashboards"]
+	if !ok {
+		return false
+	}
+	return re.MatchString(dashboards)
+}
+
+func TestKubernetesMergeBlockingJobsMustHavePodQOSGuaranteed(t *testing.T) {
+	repo := "kubernetes/kubernetes"
+	jobs := c.AllStaticPresubmits([]string{repo})
+	sort.Slice(jobs, func(i, j int) bool {
+		return jobs[i].Name < jobs[j].Name
+	})
+	for _, job := range jobs {
+		// Only consider Pods that are merge-blocking
+		if job.Spec == nil || !isMergeBlocking(job) {
+			continue
+		}
+		branches := job.Branches
+		errs := verifyPodQOSGuaranteed(job.Spec)
+		for _, err := range errs {
+			t.Errorf("%v (%v): %v", job.Name, branches, err)
+		}
+	}
+}
+
+func TestKubernetesReleaseBlockingJobsMustHavePodQOSGuaranteed(t *testing.T) {
+	for _, job := range allStaticJobs() {
+		// Only consider Pods that are release-blocking
+		if job.Spec == nil || !isKubernetesReleaseBlocking(job) {
+			continue
+		}
+		errs := verifyPodQOSGuaranteed(job.Spec)
+		for _, err := range errs {
+			t.Errorf("%v: %v", job.Name, err)
+		}
+	}
+}
+
+// TODO: may need to rewrite to handle nodepools or handle jobs that can't be
+// migrated over for a while
+// TODO: s/Should/Must and s/Logf/Errorf when all jobs pass
+func TestKubernetesMergeBlockingJobsShouldRunOnK8sInfraProwBuild(t *testing.T) {
+	repo := "kubernetes/kubernetes"
+	jobs := c.AllStaticPresubmits([]string{repo})
+	sort.Slice(jobs, func(i, j int) bool {
+		return jobs[i].Name < jobs[j].Name
+	})
+	for _, job := range jobs {
+		// Only consider Pods that are merge-blocking
+		if job.Spec == nil || !isMergeBlocking(job) {
+			continue
+		}
+		branches := job.Branches
+		if job.Cluster != "k8s-infra-prow-build" {
+			t.Logf("%v (%v): should run on cluster: k8s-infra-prow-build, found: %v", job.Name, branches, job.Cluster)
+		}
+	}
+}
+
+// TODO: may need to rewrite to handle nodepools or handle jobs that can't be
+// migrated over for a while
+// TODO: s/Should/Must and s/Logf/Errorf when all jobs pass
+func TestKubernetesReleaseBlockingJobsShouldRunOnK8sInfraProwBuild(t *testing.T) {
+	for _, job := range allStaticJobs() {
+		// Only consider Pods that are release-blocking
+		if job.Spec == nil || !isKubernetesReleaseBlocking(job) {
+			continue
+		}
+		if job.Cluster != "k8s-infra-prow-build" {
+			t.Logf("%v: should run on cluster: k8s-infra-prow-build, found: %v", job.Name, job.Cluster)
+		}
+	}
+}
+
+func TestK8sInfraProwBuildJobsMustHavePodQOSGuaranteed(t *testing.T) {
+	jobs := allStaticJobs()
+	for _, job := range jobs {
+		// Only consider Pods destined for the k8s-infra-prow-builds cluster
+		if job.Spec == nil || job.Cluster != "k8s-infra-prow-build" {
+			continue
+		}
+		errs := verifyPodQOSGuaranteed(job.Spec)
+		for _, err := range errs {
+			t.Errorf("%v: %v", job.Name, err)
+		}
+	}
+}
+
+// We have k8s-infra-prow-build setup to auto-scale, but as a quick static
+// check, let's pretend every job schedules one instance to the cluster
+// at the exact same time. This is a poor approximation since there will
+// likely be N presubmits running simultaneously.
+func TestK8sInfraProwBuildJobsMustNotExceedTotalCapacity(t *testing.T) {
+	// k8s-infra-prow-build pool1 is 3-zonal 6-30 n1-highmem-8's
+	maxLimit := coreapi.ResourceList{
+		coreapi.ResourceCPU:    resource.MustParse("720"),    // 3 * 30 * 8 CPUs per n1-highmem-8
+		coreapi.ResourceMemory: resource.MustParse("4680Gi"), // 3 * 30 * 52 Gi per n1-highmem-8
+	}
+	resourceNames := []coreapi.ResourceName{
+		coreapi.ResourceCPU,
+		coreapi.ResourceMemory,
+	}
+	zero := resource.MustParse("0")
+	totalLimit := coreapi.ResourceList{}
+	for _, r := range resourceNames {
+		totalLimit[r] = zero.DeepCopy()
+	}
+	jobs := allStaticJobs()
+	for _, job := range jobs {
+		// Only consider Pods destined for the k8s-infra-prow-builds cluster
+		if job.Spec == nil || job.Cluster != "k8s-infra-prow-build" {
+			continue
+		}
+		for _, c := range job.Spec.Containers {
+			for _, r := range resourceNames {
+				if limit, ok := c.Resources.Limits[r]; ok {
+					total := totalLimit[r]
+					total.Add(limit)
+					totalLimit[r] = total
+				}
+			}
+		}
+	}
+	for _, r := range resourceNames {
+		total, _ := totalLimit[r]
+		max, _ := maxLimit[r]
+		if total.Cmp(max) > -1 {
+			t.Errorf("Total %s limit %s greater than expected limit %s", r, total.String(), max.String())
+		}
+	}
+}
+
+// Fast builds take 20-30m, cross builds take 90m-2h. We want to pick up builds
+// containing the latest merged PRs as soon as possible for the in-development release
+func TestSigReleaseMasterBlockingOrInformingJobsShouldUseFastBuilds(t *testing.T) {
+	jobs := allStaticJobs()
+	for _, job := range jobs {
+		dashboards, ok := job.Annotations["testgrid-dashboards"]
+		if !ok || !strings.Contains(dashboards, "sig-release-master-blocking") || !strings.Contains(dashboards, "sig-release-master-informing") {
+			continue
+		}
+		extract := ""
+		for _, arg := range job.Spec.Containers[0].Args {
+			if strings.HasPrefix(arg, "--extract=") {
+				extract = strings.TrimPrefix(arg, "--extract=")
+				if extract == "ci/latest" {
+					t.Errorf("%s: release-master-blocking e2e jobs must use --extract=ci/latest-fast, found --extract=ci/latest instead", job.Name)
+				}
 			}
 		}
 	}

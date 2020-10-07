@@ -24,10 +24,10 @@ get-cluster-credentials:
 	kubectl config use-context gke_k8s-gubernator_us-west1-b_g8r || gcloud container clusters get-credentials "$(CLUSTER)" --project="$(PROJECT)" --zone="$(ZONE)"
 
 push-prod:
-  bazel run //images/builder -- --project=k8s-testimages --scratch-bucket=gs://k8s-testimages-scratch kettle
+	bazel run //images/builder -- --project=k8s-testimages --scratch-bucket=gs://k8s-testimages-scratch --build-dir=. kettle/
 
 push:
-	bazel run //images/builder -- --allow-dirty kettle
+	bazel run //images/builder -- --project=k8s-testimages --allow-dirty --build-dir=. kettle/
 
 deploy: get-cluster-credentials
 	sed "s/:latest/:$(TAG)/g" deployment.yaml | kubectl apply -f - --record

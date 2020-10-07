@@ -9,7 +9,7 @@ presubmits:
       preset-dind-enabled: "true"
     spec:
       containers:
-      - image: gcr.io/k8s-testimages/krte:v20200619-19b0ee3-master
+      - image: gcr.io/k8s-testimages/krte:v20200916-8dd1247-master
         command:
         - wrapper.sh
         - ./hack/ci/build-all.sh
@@ -24,7 +24,7 @@ presubmits:
       preset-dind-enabled: "true"
     spec:
       containers:
-      - image: gcr.io/k8s-testimages/krte:v20200619-19b0ee3-master
+      - image: gcr.io/k8s-testimages/krte:v20200916-8dd1247-master
         command:
         - wrapper.sh
         - make
@@ -40,10 +40,11 @@ presubmits:
       preset-dind-enabled: "true"
     spec:
       containers:
-      - image: gcr.io/k8s-testimages/krte:v20200619-19b0ee3-experimental
+      - image: gcr.io/k8s-testimages/krte:v20200916-8dd1247-experimental
         command:
         - wrapper.sh
-        - ./hack/verify/all.sh
+        - make
+        - verify
         # we need privileged mode in order to do docker in docker
         securityContext:
           privileged: true
@@ -67,7 +68,7 @@ presubmits:
       grace_period: 15m
     spec:
       containers:
-      - image: gcr.io/k8s-testimages/krte:v20200619-19b0ee3-master
+      - image: gcr.io/k8s-testimages/krte:v20200916-8dd1247-master
         command:
         - wrapper.sh
         - bash
@@ -91,7 +92,7 @@ presubmits:
         resources:
           requests:
             memory: "9000Mi"
-            cpu: 7500m
+            cpu: 7400m
   # conformance test against kubernetes master branch with `kind`, skipping
   # serial tests so it runs in ~20m
   # GA-only variant
@@ -102,7 +103,7 @@ presubmits:
       preset-bazel-remote-cache-enabled: "true"
       preset-dind-enabled: "true"
       preset-kind-volume-mounts: "true"
-    always_run: false
+    always_run: true
     decorate: true
     extra_refs:
     - org: kubernetes
@@ -114,7 +115,7 @@ presubmits:
       timeout: 40m
     spec:
       containers:
-      - image: gcr.io/k8s-testimages/krte:v20200619-19b0ee3-master
+      - image: gcr.io/k8s-testimages/krte:v20200916-8dd1247-master
         env:
         # skip serial tests and run with --ginkgo-parallel
         - name: "PARALLEL"
@@ -160,7 +161,7 @@ presubmits:
       timeout: 40m
     spec:
       containers:
-      - image: gcr.io/k8s-testimages/krte:v20200619-19b0ee3-master
+      - image: gcr.io/k8s-testimages/krte:v20200916-8dd1247-master
         env:
         # skip serial tests and run with --ginkgo-parallel
         - name: "PARALLEL"
@@ -211,7 +212,7 @@ presubmits:
       grace_period: 15m
     spec:
       containers:
-      - image: gcr.io/k8s-testimages/krte:v20200619-19b0ee3-master
+      - image: gcr.io/k8s-testimages/krte:v20200916-8dd1247-master
         command:
         - wrapper.sh
         - bash
@@ -260,7 +261,7 @@ presubmits:
       grace_period: 15m
     spec:
       containers:
-      - image: gcr.io/k8s-testimages/krte:v20200619-19b0ee3-1.18
+      - image: gcr.io/k8s-testimages/krte:v20200916-8dd1247-1.18
         command:
         - wrapper.sh
         - bash
@@ -310,7 +311,7 @@ presubmits:
       timeout: 40m
     spec:
       containers:
-      - image: gcr.io/k8s-testimages/krte:v20200619-19b0ee3-1.17
+      - image: gcr.io/k8s-testimages/krte:v20200916-8dd1247-1.17
         env:
         # skip serial tests and run with --ginkgo-parallel
         - name: "PARALLEL"
@@ -353,7 +354,7 @@ presubmits:
       timeout: 40m
     spec:
       containers:
-      - image: gcr.io/k8s-testimages/krte:v20200619-19b0ee3-1.16
+      - image: gcr.io/k8s-testimages/krte:v20200916-8dd1247-1.16
         env:
         # skip serial tests and run with --ginkgo-parallel
         - name: "PARALLEL"
@@ -402,7 +403,7 @@ presubmits:
         - name: "PARALLEL"
           value: "true"
         - name: BUILD_TYPE
-          value: bazel
+          value: not-bazel
         command:
         - wrapper.sh
         - bash

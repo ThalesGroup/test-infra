@@ -147,9 +147,6 @@ func newGKE(provider, project, zone, region, network, image, imageFamily, imageP
 	}
 	g.network = network
 
-	if image == "" {
-		return nil, fmt.Errorf("--gcp-node-image must be set for GKE deployment")
-	}
 	if strings.ToUpper(image) == "CUSTOM" {
 		if imageFamily == "" || imageProject == "" {
 			return nil, fmt.Errorf("--image-family and --image-project must be set for GKE deployment if --gcp-node-image=CUSTOM")
@@ -324,11 +321,17 @@ func (g *gkeDeployer) Up() error {
 	args = append(args,
 		"--project="+g.project,
 		g.location,
-		"--machine-type="+def.MachineType,
-		"--image-type="+g.image,
-		"--num-nodes="+strconv.Itoa(def.Nodes),
 		"--network="+g.network,
 	)
+	if def.Nodes > 0 {
+		args = append(args, "--num-nodes="+strconv.Itoa(def.Nodes))
+	}
+	if def.MachineType != "" {
+		args = append(args, "--machine-type="+def.MachineType)
+	}
+	if g.image != "" {
+		args = append(args, "--image-type="+g.image)
+	}
 	args = append(args, def.ExtraArgs...)
 	if strings.ToUpper(g.image) == "CUSTOM" {
 		args = append(args, "--image-family="+g.imageFamily)
@@ -336,6 +339,8 @@ func (g *gkeDeployer) Up() error {
 		// gcloud enables node auto-upgrade by default, which doesn't work with CUSTOM image.
 		// We disable auto-upgrade explicitly here.
 		args = append(args, "--no-enable-autoupgrade")
+		// Custom images are not supported with shielded nodes (which is enaled by default) in GKE.
+		args = append(args, "--no-enable-shielded-nodes")
 	}
 	if g.subnetwork != "" {
 		args = append(args, "--subnetwork="+g.subnetwork)
@@ -359,9 +364,6 @@ func (g *gkeDeployer) Up() error {
 
 	if *gkeReleaseChannel != "" {
 		args = append(args, "--release-channel="+*gkeReleaseChannel)
-		if strings.EqualFold(*gkeReleaseChannel, "rapid") {
-			args = append(args, "--enable-autorepair")
-		}
 	} else {
 		// TODO(zmerlynn): The version should be plumbed through Extract
 		// or a separate flag rather than magic env variables.
@@ -382,8 +384,10 @@ func (g *gkeDeployer) Up() error {
 			"--cluster=" + g.cluster,
 			"--project=" + g.project,
 			g.location,
-			"--machine-type=" + pool.MachineType,
 			"--num-nodes=" + strconv.Itoa(pool.Nodes)}
+		if pool.MachineType != "" {
+			poolArgs = append(poolArgs, "--machine-type="+pool.MachineType)
+		}
 		poolArgs = append(poolArgs, pool.ExtraArgs...)
 		if err := control.FinishRunning(exec.Command("gcloud", g.containerArgs(poolArgs...)...)); err != nil {
 			return fmt.Errorf("error creating node pool %q: %v", poolName, err)
@@ -406,8 +410,9 @@ func (g *gkeDeployer) DumpClusterLogs(localPath, gcsPath string) error {
 	// gkeLogDumpTemplate is a template of a shell script where
 	// - %[1]s is the project
 	// - %[2]s is the zone
-	// - %[3]s is a filter composed of the instance groups
-	// - %[4]s is the log-dump.sh command line
+	// - %[3]s is the OS distribution of nodes
+	// - %[4]s is a filter composed of the instance groups
+	// - %[5]s is the log-dump.sh command line
 	const gkeLogDumpTemplate = `
 function log_dump_custom_get_instances() {
   if [[ $1 == "master" ]]; then return 0; fi

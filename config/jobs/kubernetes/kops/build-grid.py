@@ -31,7 +31,7 @@ template = """
       - runner.sh
       - /workspace/scenarios/kubernetes_e2e.py
       args:
-      - --cluster=e2e-kops{{suffix}}.test-cncf-aws.k8s.io
+      - --cluster={{cluster_name}}
       - --deployment=kops
       - --kops-ssh-user={{kops_ssh_user}}
       - --env=KUBE_SSH_USER={{kops_ssh_user}}
@@ -43,11 +43,17 @@ template = """
       - --kops-args={{kops_args}}
       - --kops-image={{kops_image}}
       - --kops-priority-path=/workspace/kubernetes/platforms/linux/amd64
-      - --kops-version=https://storage.googleapis.com/kops-ci/bin/latest-ci-updown-green.txt
+      - --kops-version={{kops_deploy_url}}
       - --provider=aws
       - --test_args={{test_args}}
       - --timeout=60m
       image: {{e2e_image}}
+      resources:
+        limits:
+          memory: 2Gi
+        requests:
+          cpu: "2"
+          memory: 2Gi
   annotations:
     testgrid-dashboards: sig-cluster-lifecycle-kops, google-aws, kops-grid, kops-distro-{{distro}}, kops-k8s-{{k8s_version}}
     testgrid-tab-name: {{tab}}
@@ -60,6 +66,33 @@ run_hourly = [
 ]
 
 run_daily = [
+]
+
+# These are job tab names of unsupported grid combinations
+skip_jobs = [
+    # https://github.com/cilium/cilium/blob/71cfb265d53b63a2be3806fb3fd4425fa36262ff/Documentation/install/system_requirements.rst#centos-foot
+    'kops-grid-cilium-amzn2',
+    'kops-grid-cilium-amzn2-k18',
+    'kops-grid-cilium-centos7',
+    'kops-grid-cilium-centos7-k17',
+    'kops-grid-cilium-centos7-k17-ko18',
+    'kops-grid-cilium-centos7-k18',
+    'kops-grid-cilium-centos7-k18-ko18',
+    'kops-grid-cilium-centos7-ko18',
+    'kops-grid-cilium-deb9',
+    'kops-grid-cilium-deb9-k18',
+    'kops-grid-cilium-rhel7',
+    'kops-grid-cilium-rhel7-k17',
+    'kops-grid-cilium-rhel7-k17-ko18',
+    'kops-grid-cilium-rhel7-k18',
+    'kops-grid-cilium-rhel7-k18-ko18',
+    'kops-grid-cilium-rhel7-ko18',
+    'kops-grid-cilium-u1604',
+    'kops-grid-cilium-u1604-k17',
+    'kops-grid-cilium-u1604-k17-ko18',
+    'kops-grid-cilium-u1604-k18',
+    'kops-grid-cilium-u1604-k18-ko18',
+    'kops-grid-cilium-u1604-ko18',
 ]
 
 def simple_hash(s):
@@ -108,7 +141,7 @@ def remove_line_with_prefix(s, prefix):
         raise Exception("line not found with prefix: " + prefix)
     return '\n'.join(keep)
 
-def build_test(cloud='aws', distro=None, networking=None, k8s_version=None):
+def build_test(cloud='aws', distro=None, networking=None, k8s_version=None, kops_version=None):
     # pylint: disable=too-many-statements,too-many-branches
 
     if distro is None:
@@ -128,7 +161,7 @@ def build_test(cloud='aws', distro=None, networking=None, k8s_version=None):
         kops_image = '136693071363/debian-10-amd64-20200511-260'
     elif distro == 'flatcar':
         kops_ssh_user = 'core'
-        kops_image = '075585003325/Flatcar-stable-2512.2.0-hvm'
+        kops_image = '075585003325/Flatcar-stable-2605.6.0-hvm'
     elif distro == 'u1604':
         kops_ssh_user = 'ubuntu'
         kops_image = '099720109477/ubuntu/images/hvm-ssd/ubuntu-xenial-16.04-amd64-server-20200429'
@@ -151,17 +184,25 @@ def build_test(cloud='aws', distro=None, networking=None, k8s_version=None):
         subs = {}
         if k8s_version:
             subs['k8s_version'] = k8s_version
+        if kops_version:
+            subs['kops_version'] = kops_version
         return s.format(**subs)
+
+    if kops_version is None:
+        # TODO: Move to kops-ci/markers/master/ once validated
+        kops_deploy_url = "https://storage.googleapis.com/kops-ci/bin/latest-ci-updown-green.txt"
+    else:
+        kops_deploy_url = expand("https://storage.googleapis.com/kops-ci/markers/release-{kops_version}/latest-ci-updown-green.txt") # pylint: disable=line-too-long
 
     if k8s_version is None:
         extract = "release/latest"
         k8s_deploy_url = "https://storage.googleapis.com/kubernetes-release/release/latest.txt"
-        e2e_image = "gcr.io/k8s-testimages/kubekins-e2e:v20200623-2424179-master"
+        e2e_image = "gcr.io/k8s-testimages/kubekins-e2e:v20201005-0b243c0-master"
     else:
         extract = expand("release/stable-{k8s_version}")
         k8s_deploy_url = expand("https://storage.googleapis.com/kubernetes-release/release/stable-{k8s_version}.txt") # pylint: disable=line-too-long
         # Hack to stop the autobumper getting confused
-        e2e_image = "gcr.io/k8s-testimages/kubekins-e2e:v20200623-2424179-1.18"
+        e2e_image = "gcr.io/k8s-testimages/kubekins-e2e:v20201005-0b243c0-1.18"
         e2e_image = e2e_image[:-4] + k8s_version
 
     kops_args = ""
@@ -181,16 +222,25 @@ def build_test(cloud='aws', distro=None, networking=None, k8s_version=None):
         suffix += "-" + distro
     if k8s_version:
         suffix += "-k" + k8s_version.replace("1.", "")
+    if kops_version:
+        suffix += "-ko" + kops_version.replace("1.", "")
 
     # We current have an issue with long cluster names; let's warn if we encounter them
-    if len(suffix) > 24:
-        raise Exception("suffix name %s is probably too long" % (suffix))
+    cluster_name = "e2e-kops" + suffix + ".test-cncf-aws.k8s.io"
+    # Apply some abbreviations to get under the limitations
+    cluster_name = cluster_name.replace("flannel", "flanl")
+    if len(cluster_name) > 53:
+        raise Exception("cluster name %s is probably too long" % (cluster_name))
 
     tab = 'kops-grid' + suffix
+
+    if tab in skip_jobs:
+        return
 
     cron = build_cron(tab)
 
     y = template
+    y = y.replace('{{cluster_name}}', cluster_name)
     y = y.replace('{{tab}}', tab)
     y = y.replace('{{suffix}}', suffix)
     y = y.replace('{{kops_ssh_user}}', kops_ssh_user)
@@ -198,6 +248,7 @@ def build_test(cloud='aws', distro=None, networking=None, k8s_version=None):
     y = y.replace('{{test_args}}', test_args)
     y = y.replace('{{cron}}', cron)
     y = y.replace('{{k8s_deploy_url}}', k8s_deploy_url)
+    y = y.replace('{{kops_deploy_url}}', kops_deploy_url)
     y = y.replace('{{extract}}', extract)
     y = y.replace('{{e2e_image}}', e2e_image)
 
@@ -211,6 +262,11 @@ def build_test(cloud='aws', distro=None, networking=None, k8s_version=None):
     else:
         y = y.replace('{{k8s_version}}', "latest")
 
+    if kops_version:
+        y = y.replace('{{kops_version}}', kops_version)
+    else:
+        y = y.replace('{{kops_version}}', "latest")
+
     if kops_image:
         y = y.replace('{{kops_image}}', kops_image)
     else:
@@ -221,6 +277,7 @@ def build_test(cloud='aws', distro=None, networking=None, k8s_version=None):
         'networking': networking,
         'distro': distro,
         'k8s_version': k8s_version,
+        'kops_version': kops_version,
     }
     jsonspec = json.dumps(spec, sort_keys=True)
 
@@ -251,8 +308,13 @@ distro_options = [
 
 k8s_versions = [
     None,
-    "1.16",
     "1.17",
+    "1.18",
+    "1.19"
+]
+
+kops_versions = [
+    None, # maps to latest
     "1.18",
 ]
 
@@ -262,10 +324,12 @@ def generate():
     for networking in networking_options:
         for distro in distro_options:
             for k8s_version in k8s_versions:
-                build_test(cloud="aws",
-                           distro=distro,
-                           k8s_version=k8s_version,
-                           networking=networking)
+                for kops_version in kops_versions:
+                    build_test(cloud="aws",
+                               distro=distro,
+                               k8s_version=k8s_version,
+                               kops_version=kops_version,
+                               networking=networking,)
 
     print("")
     print("# %d jobs, total of %d runs per week" % (job_count, runs_per_week))

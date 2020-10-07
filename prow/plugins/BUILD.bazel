@@ -17,8 +17,10 @@ go_test(
     deps = [
         "//prow/bugzilla:go_default_library",
         "//prow/github:go_default_library",
+        "@com_github_google_go_cmp//cmp:go_default_library",
         "@io_k8s_apimachinery//pkg/util/diff:go_default_library",
         "@io_k8s_sigs_yaml//:go_default_library",
+        "@io_k8s_utils//pointer:go_default_library",
     ],
 )
 
@@ -40,6 +42,7 @@ go_library(
         "//prow/github:go_default_library",
         "//prow/kube:go_default_library",
         "//prow/labels:go_default_library",
+        "//prow/logrusutil:go_default_library",
         "//prow/pluginhelp:go_default_library",
         "//prow/repoowners:go_default_library",
         "//prow/slack:go_default_library",
@@ -91,6 +94,7 @@ filegroup(
         "//prow/plugins/label:all-srcs",
         "//prow/plugins/lgtm:all-srcs",
         "//prow/plugins/lifecycle:all-srcs",
+        "//prow/plugins/merge-method-comment:all-srcs",
         "//prow/plugins/mergecommitblocker:all-srcs",
         "//prow/plugins/milestone:all-srcs",
         "//prow/plugins/milestoneapplier:all-srcs",

@@ -345,15 +345,7 @@ presubmits:
       containers:
       - image: l.gcr.io/google/bazel:0.24.0
         command:
-          - "bazel"
-        args:
-          - "--host_jvm_args=-Xmx500m"
-          - "--host_jvm_args=-Xms500m"
-          - "test"
-          - "--noshow_progress"
-          - "--noshow_loading_progress"
-          - "--define=grpc_no_ares=true"
-          - "//backend/..."
+        - ./test/presubmit-backend-test.sh
   - name: kubeflow-pipeline-e2e-test
     cluster: kubeflow
     always_run: true
@@ -362,7 +354,7 @@ presubmits:
       preset-service-account: "true"
     spec:
       containers:
-      - image: gcr.io/k8s-testimages/kubekins-e2e:v20200623-2424179-master
+      - image: gcr.io/k8s-testimages/kubekins-e2e:v20201005-0b243c0-master
         command:
         - ./test/presubmit-tests-with-pipeline-deployment.sh
         args:
@@ -378,7 +370,7 @@ presubmits:
       preset-service-account: "true"
     spec:
       containers:
-      - image: gcr.io/k8s-testimages/kubekins-e2e:v20200623-2424179-master
+      - image: gcr.io/k8s-testimages/kubekins-e2e:v20201005-0b243c0-master
         command:
         - ./test/presubmit-tests-with-pipeline-deployment.sh
         args:
@@ -396,7 +388,7 @@ presubmits:
       preset-service-account: "true"
     spec:
       containers:
-      - image: gcr.io/k8s-testimages/kubekins-e2e:v20200623-2424179-master
+      - image: gcr.io/k8s-testimages/kubekins-e2e:v20201005-0b243c0-master
         command:
         - ./test/presubmit-tests-with-pipeline-deployment.sh
         args:
@@ -416,7 +408,7 @@ presubmits:
       preset-service-account: "true"
     spec:
       containers:
-      - image: gcr.io/k8s-testimages/kubekins-e2e:v20200623-2424179-master
+      - image: gcr.io/k8s-testimages/kubekins-e2e:v20201005-0b243c0-master
         command:
         - ./test/presubmit-tests-mkp.sh
   - name: kubeflow-pipeline-upgrade-test
@@ -427,7 +419,7 @@ presubmits:
       preset-service-account: "true"
     spec:
       containers:
-      - image: gcr.io/k8s-testimages/kubekins-e2e:v20200623-2424179-master
+      - image: gcr.io/k8s-testimages/kubekins-e2e:v20201005-0b243c0-master
         command:
         - ./test/upgrade-tests.sh
         args:
@@ -435,9 +427,7 @@ presubmits:
         - upgrade_test
 
   - name: kubeflow-pipelines-sdk-python35
-    always_run: false
     decorate: true
-    skip_report: true
     labels:
       preset-service-account: "true"
     run_if_changed: "sdk/.*"
@@ -448,9 +438,7 @@ presubmits:
         - ./test/presubmit-tests-sdk.sh
 
   - name: kubeflow-pipelines-sdk-python36
-    always_run: false
     decorate: true
-    skip_report: true
     labels:
       preset-service-account: "true"
     run_if_changed: "sdk/.*"
@@ -461,9 +449,7 @@ presubmits:
         - ./test/presubmit-tests-sdk.sh
 
   - name: kubeflow-pipelines-sdk-python37
-    always_run: false
     decorate: true
-    skip_report: true
     labels:
       preset-service-account: "true"
     run_if_changed: "sdk/.*"
@@ -474,9 +460,7 @@ presubmits:
         - ./test/presubmit-tests-sdk.sh
 
   - name: kubeflow-pipelines-sdk-python38
-    always_run: false
     decorate: true
-    skip_report: true
     labels:
       preset-service-account: "true"
     run_if_changed: "sdk/.*"
@@ -487,9 +471,7 @@ presubmits:
         - ./test/presubmit-tests-sdk.sh
 
   - name: kubeflow-pipelines-tfx-python36
-    always_run: false
     decorate: true
-    skip_report: true
     labels:
       preset-service-account: "true"
     run_if_changed: "sdk/.*"
@@ -500,9 +482,7 @@ presubmits:
         - ./test/presubmit-tests-tfx.sh
 
   - name: kubeflow-pipelines-component-yaml
-    always_run: false
     decorate: true
-    skip_report: true
     labels:
       preset-service-account: "true"
     run_if_changed: "components/.*\\.yaml"
@@ -513,9 +493,7 @@ presubmits:
         - ./test/presubmit-component-yaml.sh
 
   - name: kubeflow-pipelines-components-gcp-python27
-    always_run: false
     decorate: true
-    skip_report: true
     labels:
       preset-service-account: "true"
     run_if_changed: "components/gcp/container/.*"
@@ -526,9 +504,7 @@ presubmits:
         - ./test/presubmit-components-gcp.sh
 
   - name: kubeflow-pipelines-components-gcp-python37
-    always_run: false
     decorate: true
-    skip_report: true
     labels:
       preset-service-account: "true"
     run_if_changed: "components/gcp/container/.*"
@@ -552,9 +528,7 @@ presubmits:
         - ./test/presubmit-component-containers.sh
 
   - name: kubeflow-pipelines-backend-visualization
-    always_run: false
     decorate: true
-    skip_report: true
     labels:
       preset-service-account: "true"
     run_if_changed: "backend/src/apiserver/visualization/.*"
@@ -573,7 +547,7 @@ presubmits:
       preset-service-account: "true"
     spec:
       containers:
-      - image: gcr.io/k8s-testimages/kubekins-e2e:v20200623-2424179-master
+      - image: gcr.io/k8s-testimages/kubekins-e2e:v20201005-0b243c0-master
         command:
         - ./test/multiuser-tests.sh
         args:
@@ -605,7 +579,7 @@ presubmits:
 #       preset-service-account: "true"
 #     spec:
 #       containers:
-#       - image: gcr.io/k8s-testimages/kubekins-e2e:v20200623-2424179-master
+#       - image: gcr.io/k8s-testimages/kubekins-e2e:v20201005-0b243c0-master
 #         command:
 #         - ./test/presubmit-tests-gce-minikube.sh
 #         args:

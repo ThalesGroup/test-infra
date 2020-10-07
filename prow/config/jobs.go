@@ -36,8 +36,7 @@ const (
 	schemeHTTPS = "https"
 )
 
-// Preset is intended to match the k8s' PodPreset feature, and may be removed
-// if that feature goes beta.
+// Presets can be used to re-use settings across multiple jobs.
 type Preset struct {
 	Labels       map[string]string `json:"labels"`
 	Env          []v1.EnvVar       `json:"env"`
@@ -354,12 +353,8 @@ func (ps Presubmit) ShouldRun(baseRef string, changes ChangedFilesProvider, forc
 	if forced {
 		return true, nil
 	}
-	if determined, shouldRun, err := ps.RegexpChangeMatcher.ShouldRun(changes); err != nil {
-		return false, err
-	} else if determined {
-		return shouldRun, nil
-	}
-	return defaults, nil
+	determined, shouldRun, err := ps.RegexpChangeMatcher.ShouldRun(changes)
+	return (determined && shouldRun) || defaults, err
 }
 
 // TriggersConditionally determines if the presubmit triggers conditionally (if it may or may not trigger).

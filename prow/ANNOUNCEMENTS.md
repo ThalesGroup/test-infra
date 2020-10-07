@@ -3,6 +3,20 @@
 ## New features
 
 New features added to each component:
+  - *September 15, 2020* Added validation to Deck that will restrict artifact requests based on storage buckets.
+    Opt-out by setting `deck.skip_storage_path_validation` in your Prow config.
+    Buckets specified in job configs (`<job>.gcs_configuration.bucket`) and 
+    plank configs (`plank.default_decoration_configs[*].gcs_configuration.bucket`) are automatically allowed access.
+    Additional buckets can be allowed by adding them to the `deck.additional_allowed_buckets` list.
+    (This feature will be enabled by default ~Jan 2021. For now, you will begin to notice violation warnings in your logs.)
+ - *August 31th, 2020* Added `gcs_browser_prefixes` field in spyglass configuration. `gcs_browser_prefix` will
+    be deprecated in February 2021. You can now specify different values for different repositories. The
+    format should be in org, org/repo or '\*' which is the default value.
+ - *July 13th, 2020* Configuring `job_url_prefix_config` with `gcs/` prefix is now deprecated.
+    Please configure a job url prefix without the `gcs/` storage provider suffix. From now on the storage
+    provider is appended automatically so multiple storage providers can be used for builds of
+    the same repository. For now we still handle the old configuration format, this will be removed
+    in *September 2020*. To be clear handling of URLs with `/view/gcs` in Deck is not deprecated.
  - *June 23rd, 2020* An [hmac](/prow/cmd/hmac) tool was added to automatically reconcile webhooks and hmac
     tokens for the orgs and repos integrated with your prow instance.
  - *June 8th, 2020* A new informer-based Plank implementation was added. It can be used by deploying
@@ -112,6 +126,16 @@ Note: versions specified in these announcements may not include bug fixes made
 in more recent versions so it is recommended that the most recent versions are
 used when updating deployments.
 
+ - *September 14th, 2020* Sinker now requires `LIST` and `WATCH` permissions for pods
+ - *September 2, 2020* The already deprecated `namespace` and `additional_namespaces` settings in the config updater will be removed in October, 2020
+ - *August 28, 2020* `tide` now ignores archived repositories in queries.
+ - *August 28, 2020* The `Clusters` format and associated `--build-cluster` flag has been removed.
+ - *August 24, 2020* The deprecated reporting functionality has been removed from Plank, use crier with `--github-workers=1` instead
+   Use a `.kube/config` with the `--kubeconfig` flag to specify credentials for external build clusters.
+ - *August 22, 2020* The `whitelist` and `branch_whitelist` fields in Slack merge warning are deprecated in favor of the new `exempt_users` and `exempt_branches` fields.
+ - *July 17, 2020* Slack reporter will no longer report all states of a Prow job if it has `Channel`
+   specified on the Prow job config. Instead, it will report the `job_states_to_report` configured in
+   the Prow job or in the Prow core config if the former does not exist.
  - *May 18, 2020* `expiry` field has been replaced with `created_at` in the HMAC secret.
  - *April 24, 2020* Horologium now defaults to `--dry-run=true`
  - *April 23, 2020* Explicitly setting `--config-path` is now required.

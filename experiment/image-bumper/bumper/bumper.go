@@ -31,8 +31,6 @@ import (
 var (
 	imageRegexp = regexp.MustCompile(`\b((?:[a-z0-9]+\.)?gcr\.io)/([a-z][a-z0-9-]{5,29}/[a-zA-Z0-9][a-zA-Z0-9_./-]+):([a-zA-Z0-9_.-]+)\b`)
 	tagRegexp   = regexp.MustCompile(`(v?\d{8}-(?:v\d(?:[.-]\d+)*-g)?[0-9a-f]{6,10}|latest)(-.+)?`)
-	tagCache    = map[string]string{}
-	httpClient  = http.Client{Timeout: 1 * time.Minute}
 )
 
 const (
@@ -42,6 +40,18 @@ const (
 	tagVersionPart = 1
 	tagExtraPart   = 2
 )
+
+type Client struct {
+	tagCache   map[string]string
+	httpClient http.Client
+}
+
+func NewClient() *Client {
+	return &Client{
+		tagCache:   map[string]string{},
+		httpClient: http.Client{Timeout: 1 * time.Minute},
+	}
+}
 
 type manifest map[string]struct {
 	TimeCreatedMs string   `json:"timeCreatedMs"`
@@ -57,9 +67,10 @@ func DeconstructTag(tag string) (date, commit, variant string) {
 	return parts[0][1:], parts[len(parts)-1], currentTagParts[tagExtraPart]
 }
 
-func findLatestTag(imageHost, imageName, currentTag string) (string, error) {
+// FindLatestTag returns the latest valid tag for the given image.
+func (cli *Client) FindLatestTag(imageHost, imageName, currentTag string) (string, error) {
 	k := imageHost + "/" + imageName + ":" + currentTag
-	if result, ok := tagCache[k]; ok {
+	if result, ok := cli.tagCache[k]; ok {
 		return result, nil
 	}
 
@@ -71,7 +82,7 @@ func findLatestTag(imageHost, imageName, currentTag string) (string, error) {
 		return currentTag, nil
 	}
 
-	resp, err := httpClient.Get("https://" + imageHost + "/v2/" + imageName + "/tags/list")
+	resp, err := cli.httpClient.Get("https://" + imageHost + "/v2/" + imageName + "/tags/list")
 	if err != nil {
 		return "", fmt.Errorf("couldn't fetch tag list: %v", err)
 	}
@@ -90,7 +101,7 @@ func findLatestTag(imageHost, imageName, currentTag string) (string, error) {
 		return "", err
 	}
 
-	tagCache[k] = latestTag
+	cli.tagCache[k] = latestTag
 
 	return latestTag, nil
 }
@@ -178,13 +189,14 @@ func updateAllTags(tagPicker func(host, image, tag string) (string, error), cont
 }
 
 // UpdateFile updates a file in place.
-func UpdateFile(path string, imageFilter *regexp.Regexp) error {
+func (cli *Client) UpdateFile(tagPicker func(imageHost, imageName, currentTag string) (string, error),
+	path string, imageFilter *regexp.Regexp) error {
 	content, err := ioutil.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("failed to read %s: %v", path, err)
 	}
 
-	newContent := updateAllTags(findLatestTag, content, imageFilter)
+	newContent := updateAllTags(tagPicker, content, imageFilter)
 
 	if err := ioutil.WriteFile(path, newContent, 0644); err != nil {
 		return fmt.Errorf("failed to write %s: %v", path, err)
@@ -193,6 +205,6 @@ func UpdateFile(path string, imageFilter *regexp.Regexp) error {
 }
 
 // GetReplacements returns the tag replacements that have been made.
-func GetReplacements() map[string]string {
-	return tagCache
+func (cli *Client) GetReplacements() map[string]string {
+	return cli.tagCache
 }

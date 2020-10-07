@@ -13,7 +13,7 @@ periodics:
   spec:
     serviceAccountName: gcb-builder
     containers:
-    - image: gcr.io/k8s-testimages/image-builder:v20200612-cd781f9
+    - image: gcr.io/k8s-testimages/image-builder:v20200901-ab141a0
       command:
         - /run.sh
       args:
@@ -48,7 +48,7 @@ periodics:
   spec:
     serviceAccountName: gcb-builder
     containers:
-    - image: gcr.io/k8s-testimages/image-builder:v20200612-cd781f9
+    - image: gcr.io/k8s-testimages/image-builder:v20200901-ab141a0
       command:
         - /run.sh
       args:
@@ -83,7 +83,7 @@ postsubmits:
       spec:
         serviceAccountName: gcb-builder
         containers:
-          - image: gcr.io/k8s-testimages/image-builder:v20200612-cd781f9
+          - image: gcr.io/k8s-testimages/image-builder:v20200901-ab141a0
             command:
               - /run.sh
             args:
@@ -97,7 +97,7 @@ postsubmits:
       rerun_auth_config:
         github_team_ids:
           - 2241179 # release-managers
-    - name: post-release-push-image-releng-ci-bazel
+    - name: post-release-push-image-releng-ci
       cluster: k8s-infra-prow-build-trusted
       annotations:
         testgrid-dashboards: sig-release-releng-informing, sig-release-image-pushes
@@ -109,14 +109,15 @@ postsubmits:
       spec:
         serviceAccountName: gcb-builder
         containers:
-          - image: gcr.io/k8s-testimages/image-builder:v20200612-cd781f9
+          - image: gcr.io/k8s-testimages/image-builder:v20200901-ab141a0
             command:
               - /run.sh
             args:
               - --project=k8s-staging-releng
               - --scratch-bucket=gs://k8s-staging-releng-gcb
               - --env-passthrough=PULL_BASE_REF
-              - images/releng-ci-bazel
+              - --build-dir=.
+              - images/releng/ci
             env:
               - name: LOG_TO_STDOUT
                 value: "y"
@@ -134,7 +135,7 @@ postsubmits:
       spec:
         serviceAccountName: gcb-builder
         containers:
-          - image: gcr.io/k8s-testimages/image-builder:v20200612-cd781f9
+          - image: gcr.io/k8s-testimages/image-builder:v20200901-ab141a0
             command:
               - /run.sh
             args:

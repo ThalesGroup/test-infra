@@ -209,8 +209,12 @@ const (
 	PullRequestActionSynchronize PullRequestEventAction = "synchronize"
 	// PullRequestActionReadyForReview means the PR is no longer a draft PR.
 	PullRequestActionReadyForReview PullRequestEventAction = "ready_for_review"
-	// PullRequestConvertedToDraft means the PR is now a draft PR.
-	PullRequestConvertedToDraft PullRequestEventAction = "converted_to_draft"
+	// PullRequestActionConvertedToDraft means the PR is now a draft PR.
+	PullRequestActionConvertedToDraft PullRequestEventAction = "converted_to_draft"
+	// PullRequestActionLocked means labels were added.
+	PullRequestActionLocked PullRequestEventAction = "locked"
+	// PullRequestActionUnlocked means labels were removed
+	PullRequestActionUnlocked PullRequestEventAction = "unlocked"
 )
 
 // GenericEvent is a lightweight struct containing just Sender, Organization and Repo as
@@ -270,6 +274,7 @@ type PullRequest struct {
 	Mergable *bool `json:"mergeable,omitempty"`
 	// If the PR doesn't have any milestone, `milestone` is null and is unmarshaled to nil.
 	Milestone *Milestone `json:"milestone,omitempty"`
+	Commits   int        `json:"commits"`
 }
 
 // PullRequestBranch contains information about a particular branch in a PR.

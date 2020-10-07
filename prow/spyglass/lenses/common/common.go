@@ -19,10 +19,12 @@ package common
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"io/ioutil"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -36,6 +38,7 @@ import (
 )
 
 var lensTemplate = template.Must(template.New("sg").Parse(string(MustAsset("static/spyglass-lens.html"))))
+var buildLogRegex = regexp.MustCompile(`^(?:[^/]*-)?build-log\.txt$`)
 
 type LensWithConfiguration struct {
 	Config LensOpt
@@ -107,8 +110,14 @@ func newLensHandler(lens api.Lens, opts lensHandlerOpts) http.HandlerFunc {
 		}
 
 		artifacts, err := FetchArtifacts(r.Context(), opts.PJFetcher, opts.ConfigGetter, opts.StorageArtifactFetcher, opts.PodLogArtifactFetcher, request.ArtifactSource, "", opts.ConfigGetter().Deck.Spyglass.SizeLimit, request.Artifacts)
-		if err != nil {
-			writeHTTPError(w, fmt.Errorf("Failed to retrieve expected artifacts: %w", err), http.StatusInternalServerError)
+		if err != nil || len(artifacts) == 0 {
+			statusCode := http.StatusInternalServerError
+			if len(artifacts) == 0 {
+				statusCode = http.StatusNotFound
+				err = errors.New("no artifacts found")
+			}
+
+			writeHTTPError(w, fmt.Errorf("failed to retrieve expected artifacts: %w", err), statusCode)
 			return
 		}
 
@@ -177,10 +186,6 @@ func FetchArtifacts(
 	if err != nil {
 		return arts, fmt.Errorf("error parsing src: %v", err)
 	}
-	jobName, buildID, err := keyToJob(src)
-	if err != nil {
-		return arts, fmt.Errorf("could not derive job: %v", err)
-	}
 	gcsKey := ""
 	switch keyType {
 	case api.ProwKeyType:
@@ -196,7 +201,8 @@ func FetchArtifacts(
 		gcsKey = fmt.Sprintf("%s://%s", keyType, strings.TrimSuffix(key, "/"))
 	}
 
-	podLogNeeded := false
+	logsNeeded := []string{}
+
 	for _, name := range artifactNames {
 		art, err := storageArtifactFetcher.Artifact(ctx, gcsKey, name, sizeLimit)
 		if err == nil {
@@ -206,16 +212,16 @@ func FetchArtifacts(
 			_, err = art.Size()
 		}
 		if err != nil {
-			if name == "build-log.txt" {
-				podLogNeeded = true
+			if buildLogRegex.MatchString(name) {
+				logsNeeded = append(logsNeeded, name)
 			}
 			continue
 		}
 		arts = append(arts, art)
 	}
 
-	if podLogNeeded {
-		art, err := podLogArtifactFetcher.Artifact(ctx, jobName, buildID, sizeLimit)
+	for _, logName := range logsNeeded {
+		art, err := podLogArtifactFetcher.Artifact(ctx, src, logName, sizeLimit)
 		if err != nil {
 			logrus.Errorf("Failed to fetch pod log: %v", err)
 		} else {
@@ -235,7 +241,7 @@ type ProwJobFetcher interface {
 // prowToGCS returns the GCS key corresponding to the given prow key
 // TODO: Unexport once we only have remote lenses
 func ProwToGCS(fetcher ProwJobFetcher, config config.Getter, prowKey string) (string, string, error) {
-	jobName, buildID, err := keyToJob(prowKey)
+	jobName, buildID, err := KeyToJob(prowKey)
 	if err != nil {
 		return "", "", fmt.Errorf("could not get GCS src: %v", err)
 	}
@@ -251,25 +257,31 @@ func ProwToGCS(fetcher ProwJobFetcher, config config.Getter, prowKey string) (st
 		return "", "", fmt.Errorf("unexpected job URL %q when finding GCS path: expected something starting with %q", url, prefix)
 	}
 
+	// example:
+	// * url: https://prow.k8s.io/view/gs/kubernetes-jenkins/logs/ci-benchmark-microbenchmarks/1258197944759226371
+	// * prefix: https://prow.k8s.io/view/
+	// * storagePath: gs/kubernetes-jenkins/logs/ci-benchmark-microbenchmarks/1258197944759226371
+	storagePath := strings.TrimPrefix(url, prefix)
+	if strings.HasPrefix(storagePath, api.GCSKeyType) {
+		storagePath = strings.Replace(storagePath, api.GCSKeyType, providers.GS, 1)
+	}
+	storagePathWithoutProvider := storagePath
+	storagePathSegments := strings.SplitN(storagePath, "/", 2)
+	if providers.HasStorageProviderPrefix(storagePath) {
+		storagePathWithoutProvider = storagePathSegments[1]
+	}
+
 	// try to parse storageProvider from DecorationConfig.GCSConfiguration.Bucket
 	// if it doesn't work fallback to URL parsing
 	if job.Spec.DecorationConfig != nil && job.Spec.DecorationConfig.GCSConfiguration != nil {
 		prowPath, err := prowv1.ParsePath(job.Spec.DecorationConfig.GCSConfiguration.Bucket)
 		if err == nil {
-			return prowPath.StorageProvider(), url[len(prefix):], nil
+			return prowPath.StorageProvider(), storagePathWithoutProvider, nil
 		}
 		logrus.Warnf("Could not parse storageProvider from DecorationConfig.GCSConfiguration.Bucket = %s: %v", job.Spec.DecorationConfig.GCSConfiguration.Bucket, err)
 	}
 
-	// now try to parse the storageProvider from the last jobURLPrefix segment, e.g.:
-	// https://prow.k8s.io/view/gcs/ => gcs
-	urlPrefixSegments := strings.Split(strings.TrimSuffix(prefix, "/"), "/")
-	storageProvider := urlPrefixSegments[len(urlPrefixSegments)-1]
-	if storageProvider == api.GCSKeyType {
-		storageProvider = providers.GS
-	}
-
-	return storageProvider, url[len(prefix):], nil
+	return storagePathSegments[0], storagePathWithoutProvider, nil
 }
 
 func splitSrc(src string) (keyType, key string, err error) {
@@ -284,7 +296,7 @@ func splitSrc(src string) (keyType, key string, err error) {
 }
 
 // keyToJob takes a spyglass URL and returns the jobName and buildID.
-func keyToJob(src string) (jobName string, buildID string, err error) {
+func KeyToJob(src string) (jobName string, buildID string, err error) {
 	src = strings.Trim(src, "/")
 	parsed := strings.Split(src, "/")
 	if len(parsed) < 2 {

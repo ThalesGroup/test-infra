@@ -19,6 +19,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -36,13 +37,18 @@ import (
 	"github.com/gorilla/sessions"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/oauth2"
+	coreapi "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/diff"
 	"k8s.io/apimachinery/pkg/util/sets"
+	ctrlruntimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/yaml"
 
 	prowapi "k8s.io/test-infra/prow/apis/prowjobs/v1"
 	"k8s.io/test-infra/prow/client/clientset/versioned/fake"
 	"k8s.io/test-infra/prow/config"
+	"k8s.io/test-infra/prow/deck/jobs"
 	"k8s.io/test-infra/prow/flagutil"
 	"k8s.io/test-infra/prow/github/fakegithub"
 	"k8s.io/test-infra/prow/githuboauth"
@@ -55,6 +61,21 @@ import (
 	"k8s.io/test-infra/prow/tide"
 	"k8s.io/test-infra/prow/tide/history"
 )
+
+type fkc []prowapi.ProwJob
+
+func (f fkc) List(ctx context.Context, pjs *prowapi.ProwJobList, _ ...ctrlruntimeclient.ListOption) error {
+	pjs.Items = f
+	return nil
+}
+
+type fca struct {
+	c config.Config
+}
+
+func (ca fca) Config() *config.Config {
+	return &ca.c
+}
 
 func TestOptions_Validate(t *testing.T) {
 	var testCases = []struct {
@@ -117,7 +138,7 @@ func TestOptions_Validate(t *testing.T) {
 
 type flc int
 
-func (f flc) GetJobLog(job, id string) ([]byte, error) {
+func (f flc) GetJobLog(job, id, container string) ([]byte, error) {
 	if job == "job" && id == "123" {
 		return []byte("hello"), nil
 	}
@@ -204,6 +225,101 @@ func TestHandleLog(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// TestHandleProwJobs just checks that the results can be unmarshaled properly, have the same
+func TestHandleProwJobs(t *testing.T) {
+	kc := fkc{
+		prowapi.ProwJob{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{
+					"hello": "world",
+				},
+				Labels: map[string]string{
+					"goodbye": "world",
+				},
+			},
+			Spec: prowapi.ProwJobSpec{
+				Agent:            prowapi.KubernetesAgent,
+				Job:              "job",
+				DecorationConfig: &prowapi.DecorationConfig{},
+				PodSpec: &coreapi.PodSpec{
+					Containers: []coreapi.Container{
+						{
+							Name:  "test-1",
+							Image: "tester1",
+						},
+						{
+							Name:  "test-2",
+							Image: "tester2",
+						},
+					},
+				},
+			},
+		},
+		prowapi.ProwJob{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{
+					"hello": "world",
+				},
+				Labels: map[string]string{
+					"goodbye": "world",
+				},
+			},
+			Spec: prowapi.ProwJobSpec{
+				Agent:            prowapi.KubernetesAgent,
+				Job:              "missing-podspec-job",
+				DecorationConfig: &prowapi.DecorationConfig{},
+			},
+		},
+	}
+	fakeJa := jobs.NewJobAgent(context.Background(), kc, false, true, map[string]jobs.PodLogClient{}, fca{}.Config)
+	fakeJa.Start()
+
+	handler := handleProwJobs(fakeJa, logrus.WithField("handler", "/prowjobs.js"))
+	req, err := http.NewRequest(http.MethodGet, "/prowjobs.js?omit=annotations,labels,decoration_config,pod_spec", nil)
+	if err != nil {
+		t.Fatalf("Error making request: %v", err)
+	}
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Bad error code: %d", rr.Code)
+	}
+	resp := rr.Result()
+	defer resp.Body.Close()
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("Error reading response body: %v", err)
+	}
+	type prowjobItems struct {
+		Items []prowapi.ProwJob `json:"items"`
+	}
+	var res prowjobItems
+	if err := json.Unmarshal(body, &res); err != nil {
+		t.Fatalf("Error unmarshaling: %v", err)
+	}
+	if res.Items[0].Annotations != nil {
+		t.Errorf("Failed to omit annotations correctly, expected: nil, got %v", res.Items[0].Annotations)
+	}
+	if res.Items[0].Labels != nil {
+		t.Errorf("Failed to omit labels correctly, expected: nil, got %v", res.Items[0].Labels)
+	}
+	if res.Items[0].Spec.DecorationConfig != nil {
+		t.Errorf("Failed to omit decoration config correctly, expected: nil, got %v", res.Items[0].Spec.DecorationConfig)
+	}
+
+	// this tests the behavior for filling a podspec with empty containers when asked to omit it
+	emptyPodspec := &coreapi.PodSpec{
+		Containers: []coreapi.Container{{}, {}},
+	}
+	if !equality.Semantic.DeepEqual(res.Items[0].Spec.PodSpec, emptyPodspec) {
+		t.Errorf("Failed to omit podspec correctly\n%s", diff.ObjectReflectDiff(res.Items[0].Spec.PodSpec, emptyPodspec))
+	}
+
+	if res.Items[1].Spec.PodSpec != nil {
+		t.Errorf("Failed to omit podspec correctly, expected: nil, got %v", res.Items[0].Spec.PodSpec)
 	}
 }
 
@@ -431,7 +547,7 @@ func TestRerun(t *testing.T) {
 			}
 
 			if tc.shouldCreateProwJob {
-				pjs, err := fakeProwJobClient.ProwV1().ProwJobs("prowjobs").List(metav1.ListOptions{})
+				pjs, err := fakeProwJobClient.ProwV1().ProwJobs("prowjobs").List(context.Background(), metav1.ListOptions{})
 				if err != nil {
 					t.Fatalf("failed to list prowjobs: %v", err)
 				}
@@ -529,7 +645,7 @@ func TestTide(t *testing.T) {
 	if len(res.Queries) != 1 {
 		t.Fatalf("Wrong number of pools. Got %d, expected 1 in %v", len(res.Queries), res.Queries)
 	}
-	if expected := "is:pr state:open repo:\"prowapi.netes/test-infra\""; res.Queries[0] != expected {
+	if expected := "is:pr state:open archived:false repo:\"prowapi.netes/test-infra\""; res.Queries[0] != expected {
 		t.Errorf("Wrong query. Got %s, expected %s", res.Queries[0], expected)
 	}
 }
@@ -1048,5 +1164,35 @@ func TestCanTriggerJob(t *testing.T) {
 		if result != tc.expectAllowed {
 			t.Errorf("got result %t, expected %t", result, tc.expectAllowed)
 		}
+	}
+}
+
+func TestHttpStatusForError(t *testing.T) {
+	testCases := []struct {
+		name           string
+		input          error
+		expectedStatus int
+	}{
+		{
+			name:           "normal_error",
+			input:          errors.New("some error message"),
+			expectedStatus: http.StatusInternalServerError,
+		},
+		{
+			name: "httpError",
+			input: httpError{
+				error:      errors.New("some error message"),
+				statusCode: http.StatusGone,
+			},
+			expectedStatus: http.StatusGone,
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(nested *testing.T) {
+			actual := httpStatusForError(tc.input)
+			if actual != tc.expectedStatus {
+				t.Fatalf("unexpected HTTP status (expected=%v, actual=%v) for error: %v", tc.expectedStatus, actual, tc.input)
+			}
+		})
 	}
 }

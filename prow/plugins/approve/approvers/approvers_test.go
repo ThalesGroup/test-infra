@@ -709,7 +709,7 @@ func TestGetMessage(t *testing.T) {
 	want := `[APPROVALNOTIFIER] This PR is **NOT APPROVED**
 
 This pull-request has been approved by: *<a href="REFERENCE" title="Approved">Bill</a>*
-To complete the [pull request process](https://git.k8s.io/community/contributors/guide/owners.md#the-code-review-process), please assign **alice**
+To complete the [pull request process](https://git.k8s.io/community/contributors/guide/owners.md#the-code-review-process), please assign **alice** after the PR has been reviewed.
 You can assign the PR to them by writing ` + "`/assign @alice`" + ` in a comment when ready.
 
 *No associated issue*. Update pull-request body to add a reference to an issue, or get approval with ` + "`/approve no-issue`" + `
@@ -726,7 +726,7 @@ Approvers can indicate their approval by writing ` + "`/approve`" + ` in a comme
 Approvers can cancel approval by writing ` + "`/approve cancel`" + ` in a comment
 </details>
 <!-- META={"approvers":["alice"]} -->`
-	if got := GetMessage(ap, &url.URL{Scheme: "https", Host: "github.com"}, "https://go.k8s.io/bot-commands", "org", "repo", "dev"); got == nil {
+	if got := GetMessage(ap, &url.URL{Scheme: "https", Host: "github.com"}, "https://go.k8s.io/bot-commands", "https://git.k8s.io/community/contributors/guide/owners.md#the-code-review-process", "org", "repo", "dev"); got == nil {
 		t.Error("GetMessage() failed")
 	} else if *got != want {
 		t.Errorf("GetMessage() = %+v, want = %+v", *got, want)
@@ -768,7 +768,7 @@ Approvers can indicate their approval by writing ` + "`/approve`" + ` in a comme
 Approvers can cancel approval by writing ` + "`/approve cancel`" + ` in a comment
 </details>
 <!-- META={"approvers":[]} -->`
-	if got := GetMessage(ap, &url.URL{Scheme: "https", Host: "github.com"}, "https://go.k8s.io/bot-commands", "org", "repo", "master"); got == nil {
+	if got := GetMessage(ap, &url.URL{Scheme: "https", Host: "github.com"}, "https://go.k8s.io/bot-commands", "https://git.k8s.io/community/contributors/guide/owners.md#the-code-review-process", "org", "repo", "master"); got == nil {
 		t.Error("GetMessage() failed")
 	} else if *got != want {
 		t.Errorf("GetMessage() = %+v, want = %+v", *got, want)
@@ -791,7 +791,7 @@ func TestGetMessageNoneApproved(t *testing.T) {
 	want := `[APPROVALNOTIFIER] This PR is **NOT APPROVED**
 
 This pull-request has been approved by: *<a href="REFERENCE" title="Author self-approved">John</a>*
-To complete the [pull request process](https://git.k8s.io/community/contributors/guide/owners.md#the-code-review-process), please assign **alice**, **bill**
+To complete the [pull request process](https://git.k8s.io/community/contributors/guide/owners.md#the-code-review-process), please assign **alice**, **bill** after the PR has been reviewed.
 You can assign the PR to them by writing ` + "`/assign @alice @bill`" + ` in a comment when ready.
 
 *No associated issue*. Update pull-request body to add a reference to an issue, or get approval with ` + "`/approve no-issue`" + `
@@ -808,7 +808,7 @@ Approvers can indicate their approval by writing ` + "`/approve`" + ` in a comme
 Approvers can cancel approval by writing ` + "`/approve cancel`" + ` in a comment
 </details>
 <!-- META={"approvers":["alice","bill"]} -->`
-	if got := GetMessage(ap, &url.URL{Scheme: "https", Host: "github.com"}, "https://go.k8s.io/bot-commands", "org", "repo", "master"); got == nil {
+	if got := GetMessage(ap, &url.URL{Scheme: "https", Host: "github.com"}, "https://go.k8s.io/bot-commands", "https://git.k8s.io/community/contributors/guide/owners.md#the-code-review-process", "org", "repo", "master"); got == nil {
 		t.Error("GetMessage() failed")
 	} else if *got != want {
 		t.Errorf("GetMessage() = %+v, want = %+v", *got, want)
@@ -852,7 +852,7 @@ Approvers can indicate their approval by writing ` + "`/approve`" + ` in a comme
 Approvers can cancel approval by writing ` + "`/approve cancel`" + ` in a comment
 </details>
 <!-- META={"approvers":[]} -->`
-	if got := GetMessage(ap, &url.URL{Scheme: "https", Host: "github.com"}, "https://go.k8s.io/bot-commands", "org", "repo", "master"); got == nil {
+	if got := GetMessage(ap, &url.URL{Scheme: "https", Host: "github.com"}, "https://go.k8s.io/bot-commands", "https://git.k8s.io/community/contributors/guide/owners.md#the-code-review-process", "org", "repo", "master"); got == nil {
 		t.Error("GetMessage() failed")
 	} else if *got != want {
 		t.Errorf("GetMessage() = %+v, want = %+v", *got, want)
@@ -895,7 +895,7 @@ Approvers can indicate their approval by writing ` + "`/approve`" + ` in a comme
 Approvers can cancel approval by writing ` + "`/approve cancel`" + ` in a comment
 </details>
 <!-- META={"approvers":[]} -->`
-	if got := GetMessage(ap, &url.URL{Scheme: "https", Host: "github.com"}, "https://go.k8s.io/bot-commands", "org", "repo", "master"); got == nil {
+	if got := GetMessage(ap, &url.URL{Scheme: "https", Host: "github.com"}, "https://go.k8s.io/bot-commands", "https://git.k8s.io/community/contributors/guide/owners.md#the-code-review-process", "org", "repo", "master"); got == nil {
 		t.Error("GetMessage() failed")
 	} else if *got != want {
 		t.Errorf("GetMessage() = %+v, want = %+v", *got, want)
@@ -919,7 +919,7 @@ func TestGetMessageMDOwners(t *testing.T) {
 	want := `[APPROVALNOTIFIER] This PR is **NOT APPROVED**
 
 This pull-request has been approved by: *<a href="REFERENCE" title="Author self-approved">John</a>*
-To complete the [pull request process](https://git.k8s.io/community/contributors/guide/owners.md#the-code-review-process), please assign **alice**, **doctor**
+To complete the [pull request process](https://git.k8s.io/community/contributors/guide/owners.md#the-code-review-process), please assign **alice**, **doctor** after the PR has been reviewed.
 You can assign the PR to them by writing ` + "`/assign @alice @doctor`" + ` in a comment when ready.
 
 *No associated issue*. Update pull-request body to add a reference to an issue, or get approval with ` + "`/approve no-issue`" + `
@@ -936,7 +936,7 @@ Approvers can indicate their approval by writing ` + "`/approve`" + ` in a comme
 Approvers can cancel approval by writing ` + "`/approve cancel`" + ` in a comment
 </details>
 <!-- META={"approvers":["alice","doctor"]} -->`
-	if got := GetMessage(ap, &url.URL{Scheme: "https", Host: "github.com"}, "https://go.k8s.io/bot-commands", "org", "repo", "master"); got == nil {
+	if got := GetMessage(ap, &url.URL{Scheme: "https", Host: "github.com"}, "https://go.k8s.io/bot-commands", "https://git.k8s.io/community/contributors/guide/owners.md#the-code-review-process", "org", "repo", "master"); got == nil {
 		t.Error("GetMessage() failed")
 	} else if *got != want {
 		t.Errorf("GetMessage() = %+v, want = %+v", *got, want)
@@ -960,7 +960,7 @@ func TestGetMessageDifferentGitHubLink(t *testing.T) {
 	want := `[APPROVALNOTIFIER] This PR is **NOT APPROVED**
 
 This pull-request has been approved by: *<a href="REFERENCE" title="Author self-approved">John</a>*
-To complete the [pull request process](https://git.k8s.io/community/contributors/guide/owners.md#the-code-review-process), please assign **alice**, **doctor**
+To complete the [pull request process](https://git.k8s.io/community/contributors/guide/owners.md#the-code-review-process), please assign **alice**, **doctor** after the PR has been reviewed.
 You can assign the PR to them by writing ` + "`/assign @alice @doctor`" + ` in a comment when ready.
 
 *No associated issue*. Update pull-request body to add a reference to an issue, or get approval with ` + "`/approve no-issue`" + `
@@ -977,7 +977,7 @@ Approvers can indicate their approval by writing ` + "`/approve`" + ` in a comme
 Approvers can cancel approval by writing ` + "`/approve cancel`" + ` in a comment
 </details>
 <!-- META={"approvers":["alice","doctor"]} -->`
-	if got := GetMessage(ap, &url.URL{Scheme: "https", Host: "github.mycorp.com"}, "https://go.k8s.io/bot-commands", "org", "repo", "master"); got == nil {
+	if got := GetMessage(ap, &url.URL{Scheme: "https", Host: "github.mycorp.com"}, "https://go.k8s.io/bot-commands", "https://git.k8s.io/community/contributors/guide/owners.md#the-code-review-process", "org", "repo", "master"); got == nil {
 		t.Error("GetMessage() failed")
 	} else if *got != want {
 		t.Errorf("GetMessage() = %+v, want = %+v", *got, want)

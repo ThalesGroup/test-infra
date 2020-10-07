@@ -44,6 +44,7 @@ const (
 	gciCi                  // gci/FAMILY/CI_VERSION
 	gke                    // gke(deprecated), gke-default, gke-latest, gke-channel-CHANNEL_NAME
 	ci                     // ci/latest, ci/latest-1.5
+	ciFast                 // ci/latest-fast, ci/latest-1.19-fast
 	rc                     // release/latest, release/latest-1.5
 	stable                 // release/stable, release/stable-1.5
 	version                // v1.5.0, v1.5.0-beta.2
@@ -78,6 +79,7 @@ func (l *extractStrategies) Set(value string) error {
 		`^gci/([\w-]+(?:\?{1}(?::?[\w-]+=[\w-]+)+)?)$`:                                     gci,
 		`^gci/([\w-]+(?:\?{1}(?::?[\w-]+=[\w-]+)+)?)/(.+)$`:                                gciCi,
 		`^ci/(.+)$`:                   ci,
+		`^ci/(.+)-fast$`:              ciFast,
 		`^release/(latest.*)$`:        rc,
 		`^release/(stable.*)$`:        stable,
 		`^(v\d+\.\d+\.\d+[\w.\-+]*)$`: version,
@@ -94,6 +96,10 @@ func (l *extractStrategies) Set(value string) error {
 		if mat == nil {
 			continue
 		}
+		if mode == ci && strings.HasSuffix(value, "-fast") {
+			// do not match ci mode if will also match ciFast
+			continue
+		}
 		e := extractStrategy{
 			mode:   mode,
 			option: mat[1],
@@ -103,6 +109,7 @@ func (l *extractStrategies) Set(value string) error {
 			e.ciVersion = mat[2]
 		}
 		*l = append(*l, e)
+		log.Printf("Matched extraction strategy: %s", search)
 		return nil
 	}
 	return fmt.Errorf("Unknown extraction strategy: %v", value)
@@ -286,20 +293,17 @@ var getKube = func(url, version string, getSrc bool) error {
 		return err
 	}
 	log.Printf("U=%s R=%s get-kube.sh", url, version)
-	for i := 0; i < 3; i++ {
+	for i := 0; i < 5; i++ {
 		err = control.FinishRunning(exec.Command(k))
 		if err == nil {
 			break
 		}
 		err = fmt.Errorf("U=%s R=%s get-kube.sh failed: %v", url, version, err)
-		if i == 2 {
-			return err
-		}
 		log.Println(err)
 		sleep(time.Duration(i) * time.Second)
 	}
 
-	return nil
+	return err
 }
 
 // wrapper for gsutil cat
@@ -309,9 +313,10 @@ var gsutilCat = func(url string) ([]byte, error) {
 
 func setReleaseFromGcs(prefix, suffix string, getSrc bool) error {
 	url := fmt.Sprintf("https://storage.googleapis.com/%v", prefix)
-	release, err := gsutilCat(fmt.Sprintf("gs://%v/%v.txt", prefix, suffix))
+	catURL := fmt.Sprintf("gs://%v/%v.txt", prefix, suffix)
+	release, err := gsutilCat(catURL)
 	if err != nil {
-		return err
+		return fmt.Errorf("Failed to set release from %s (%v)", catURL, err)
 	}
 	return getKube(url, strings.TrimSpace(string(release)), getSrc)
 }
@@ -336,14 +341,14 @@ var httpCat = func(url string) ([]byte, error) {
 	return release, nil
 }
 
-func setReleaseFromHTTP(prefix, suffix string, getSrc bool) error {
+func setReleaseFromHTTP(prefix, suffix string) (string, string, error) {
 	url := fmt.Sprintf("https://storage.googleapis.com/%s", prefix)
-	release, err := httpCat(fmt.Sprintf("%s/%s.txt", url, suffix))
+	catURL := fmt.Sprintf("%s/%s.txt", url, suffix)
+	release, err := httpCat(catURL)
 	if err != nil {
-		return err
+		return "", "", fmt.Errorf("Failed to set release from %s (%v)", catURL, err)
 	}
-
-	return getKube(url, strings.TrimSpace(string(release)), getSrc)
+	return url, strings.TrimSpace(string(release)), nil
 }
 
 var parseGciExtractOption = func(option string) (string, map[string]string) {
@@ -411,9 +416,10 @@ func setupGciVars(f string, p string) (string, error) {
 }
 
 func setReleaseFromGci(image string, k8sMapBucket string, getSrc bool) error {
-	b, err := gsutilCat(fmt.Sprintf("gs://%s/k8s-version-map/%s", k8sMapBucket, image))
+	catURL := fmt.Sprintf("gs://%s/k8s-version-map/%s", k8sMapBucket, image)
+	b, err := gsutilCat(catURL)
 	if err != nil {
-		return err
+		return fmt.Errorf("Failed to set release from %s (%v)", catURL, err)
 	}
 	r := fmt.Sprintf("v%s", b)
 	return getKube("https://storage.googleapis.com/kubernetes-release/release", strings.TrimSpace(r), getSrc)
@@ -524,9 +530,26 @@ func (e extractStrategy) Extract(project, zone, region string, extractSrc bool) 
 			return setReleaseFromGcs("gke-release-staging/kubernetes/release", e.option, extractSrc)
 		}
 
-		return setReleaseFromHTTP("kubernetes-release-dev/ci", e.option, extractSrc)
+		url, release, err := setReleaseFromHTTP("kubernetes-release-dev/ci", e.option)
+		if err != nil {
+			return err
+		}
+		return getKube(url, release, extractSrc)
+	case ciFast:
+		// ciFast latest version marker is published to
+		// 'kubernetes-release-dev/ci/<version>-fast.txt' but the actual source
+		// is at 'kubernetes-release-dev/ci/fast/<version>/kubernetes.tar.gz'
+		url, release, err := setReleaseFromHTTP("kubernetes-release-dev/ci", fmt.Sprintf("%s-fast", e.option))
+		if err != nil {
+			return err
+		}
+		return getKube(fmt.Sprintf("%s/fast", url), release, extractSrc)
 	case rc, stable:
-		return setReleaseFromHTTP("kubernetes-release/release", e.option, extractSrc)
+		url, release, err := setReleaseFromHTTP("kubernetes-release/release", e.option)
+		if err != nil {
+			return err
+		}
+		return getKube(url, release, extractSrc)
 	case version:
 		var url string
 		release := e.option

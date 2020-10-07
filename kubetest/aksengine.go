@@ -84,8 +84,10 @@ var (
 	testCcm                  = flag.Bool("test-ccm", false, "Set to True if you want kubetest to run e2e tests for ccm")
 	testAzureFileCSIDriver   = flag.Bool("test-azure-file-csi-driver", false, "Set to True if you want kubetest to run e2e tests for Azure File CSI driver")
 	testAzureDiskCSIDriver   = flag.Bool("test-azure-disk-csi-driver", false, "Set to True if you want kubetest to run e2e tests for Azure Disk CSI driver")
-	testBlobfuseCSIDriver    = flag.Bool("test-blobfuse-csi-driver", false, "Set to True if you want kubetest to run e2e tests for Blobfuse CSI driver")
+	testBlobCSIDriver        = flag.Bool("test-blob-csi-driver", false, "Set to True if you want kubetest to run e2e tests for Azure Blob Storage CSI driver")
 	testSecretStoreCSIDriver = flag.Bool("test-secrets-store-csi-driver", false, "Set to True if you want kubetest to run e2e tests for Secrets Store CSI driver")
+	testSMBCSIDriver         = flag.Bool("test-csi-driver-smb", false, "Set to True if you want kubetest to run e2e tests for SMB CSI driver")
+	testNFSCSIDriver         = flag.Bool("test-csi-driver-nfs", false, "Set to True if you want kubetest to run e2e tests for NFS CSI driver")
 	// Commonly used variables
 	k8sVersion                = getImageVersion(util.K8s("kubernetes"))
 	cloudProviderAzureVersion = getImageVersion(util.K8sSigs("cloud-provider-azure"))
@@ -418,36 +420,7 @@ func newAKSEngine() (*aksEngineDeployer, error) {
 		return nil, err
 	}
 
-	if err := c.azLogin(); err != nil {
-		return nil, err
-	}
-
 	return &c, nil
-}
-
-func (c *aksEngineDeployer) azLogin() error {
-	// Check if azure-cli has been installed
-	if err := control.FinishRunning(exec.Command("az")); err != nil {
-		if err := installAzureCLI(); err != nil {
-			return err
-		}
-	}
-
-	cmd := exec.Command("az", "login", "--service-principal",
-		fmt.Sprintf("-u=%s", c.credentials.ClientID),
-		fmt.Sprintf("-p=%s", c.credentials.ClientSecret),
-		fmt.Sprintf("-t=%s", c.credentials.TenantID))
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed az login with error: %v", err)
-	}
-
-	cmd = exec.Command("az", "account", "set", "-s", c.credentials.SubscriptionID)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to az account set: %v", err)
-	}
-
-	log.Println("az login success.")
-	return nil
 }
 
 func getAKSDeploymentMethod(k8sRelease string) aksDeploymentMethod {
@@ -493,15 +466,6 @@ func (c *aksEngineDeployer) populateAPIModelTemplate() error {
 		return fmt.Errorf("No template file specified %v", err)
 	}
 
-	// set default distro so we do not use prebuilt os image
-	if v.Properties.MasterProfile.Distro == "" {
-		v.Properties.MasterProfile.Distro = "ubuntu"
-	}
-	for _, agentPool := range v.Properties.AgentPoolProfiles {
-		if agentPool.Distro == "" {
-			agentPool.Distro = "ubuntu"
-		}
-	}
 	// replace APIModel template properties from flags
 	if c.location != "" {
 		v.Location = c.location
@@ -1125,7 +1089,7 @@ func (c *aksEngineDeployer) Build(b buildStrategy) error {
 		if c.customKubeBinaryURL, err = c.uploadToAzureStorage(newK8sNodeTarball); err != nil {
 			return err
 		}
-	} else if !*testCcm && !*testAzureDiskCSIDriver && !*testAzureFileCSIDriver && !*testBlobfuseCSIDriver && !*testSecretStoreCSIDriver && !strings.EqualFold(string(b), "none") {
+	} else if !*testCcm && !*testAzureDiskCSIDriver && !*testAzureFileCSIDriver && !*testBlobCSIDriver && !*testSecretStoreCSIDriver && !*testSMBCSIDriver && !*testNFSCSIDriver && !strings.EqualFold(string(b), "none") {
 		// Only build the required components to run upstream e2e tests
 		for _, component := range []string{"WHAT='test/e2e/e2e.test'", "WHAT=cmd/kubectl", "ginkgo"} {
 			cmd := exec.Command("make", component)
@@ -1208,7 +1172,8 @@ func (c *aksEngineDeployer) DumpClusterLogs(localPath, gcsPath string) error {
 		errors = append(errors, err.Error())
 	}
 	if err := logDumperWindows(); err != nil {
-		errors = append(errors, err.Error())
+		// don't log error since logDumperWindows failed is expected on non-Windows cluster
+		//errors = append(errors, err.Error())
 	}
 	if len(errors) != 0 {
 		return fmt.Errorf(strings.Join(errors, "\n"))
@@ -1247,7 +1212,7 @@ func (c *aksEngineDeployer) TestSetup() error {
 			log.Printf("error during setting up azure credentials: %v", err)
 			return err
 		}
-	} else if *testAzureFileCSIDriver || *testAzureDiskCSIDriver || *testBlobfuseCSIDriver {
+	} else if *testAzureFileCSIDriver || *testAzureDiskCSIDriver || *testBlobCSIDriver || *testSMBCSIDriver || *testNFSCSIDriver {
 		// Set env vars required by CSI driver e2e jobs.
 		// tenantId, subscriptionId, aadClientId, and aadClientSecret will be obtained from AZURE_CREDENTIAL
 		if err := os.Setenv("RESOURCE_GROUP", c.resourceGroup); err != nil {
@@ -1305,10 +1270,14 @@ func (c *aksEngineDeployer) BuildTester(o *e2e.BuildTesterOptions) (e2e.Tester, 
 		csiDriverName = "azuredisk-csi-driver"
 	} else if *testAzureFileCSIDriver {
 		csiDriverName = "azurefile-csi-driver"
-	} else if *testBlobfuseCSIDriver {
-		csiDriverName = "blobfuse-csi-driver"
+	} else if *testBlobCSIDriver {
+		csiDriverName = "blob-csi-driver"
 	} else if *testSecretStoreCSIDriver {
 		csiDriverName = "secrets-store-csi-driver"
+	} else if *testSMBCSIDriver {
+		csiDriverName = "csi-driver-smb"
+	} else if *testNFSCSIDriver {
+		csiDriverName = "csi-driver-nfs"
 	}
 	if csiDriverName != "" {
 		return &GinkgoCSIDriverTester{

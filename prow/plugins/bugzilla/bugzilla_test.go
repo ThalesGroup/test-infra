@@ -224,7 +224,7 @@ func TestDigestPR(t *testing.T) {
 			},
 			validateByDefault: &yes,
 			expected: &event{
-				org: "org", repo: "repo", baseRef: "branch", number: 1, state: "open", missing: true, bugId: 0, body: "fixing a typo", htmlUrl: "http.com", login: "user",
+				org: "org", repo: "repo", baseRef: "branch", number: 1, state: "open", missing: true, opened: true, bugId: 0, body: "fixing a typo", htmlUrl: "http.com", login: "user",
 			},
 		},
 		{
@@ -251,7 +251,7 @@ func TestDigestPR(t *testing.T) {
 				},
 			},
 			expected: &event{
-				org: "org", repo: "repo", baseRef: "branch", number: 1, state: "open", bugId: 123, body: "Bug 123: fixed it!", htmlUrl: "http.com", login: "user",
+				org: "org", repo: "repo", baseRef: "branch", number: 1, state: "open", opened: true, bugId: 123, body: "Bug 123: fixed it!", htmlUrl: "http.com", login: "user",
 			},
 		},
 		{
@@ -308,6 +308,35 @@ func TestDigestPR(t *testing.T) {
 			},
 		},
 		{
+			name: "non-bugzilla cherrypick PR sets e.missing to true",
+			pre: github.PullRequestEvent{
+				Action: github.PullRequestActionOpened,
+				PullRequest: github.PullRequest{
+					Base: github.PullRequestBranch{
+						Repo: github.Repo{
+							Owner: github.User{
+								Login: "org",
+							},
+							Name: "repo",
+						},
+						Ref: "release-4.4",
+					},
+					Number:  3,
+					Title:   "[release-4.4] fixing a typo",
+					HTMLURL: "http.com",
+					User: github.User{
+						Login: "user",
+					},
+					Body: `This is an automated cherry-pick of #2
+
+/assign user`,
+				},
+			},
+			expected: &event{
+				org: "org", repo: "repo", baseRef: "release-4.4", number: 3, opened: true, body: "[release-4.4] fixing a typo", htmlUrl: "http.com", login: "user", cherrypick: true, cherrypickFromPRNum: 2, cherrypickTo: "release-4.4", missing: true,
+			},
+		},
+		{
 			name: "cherrypicked PR gets cherrypick event",
 			pre: github.PullRequestEvent{
 				Action: github.PullRequestActionOpened,
@@ -333,7 +362,7 @@ func TestDigestPR(t *testing.T) {
 				},
 			},
 			expected: &event{
-				org: "org", repo: "repo", baseRef: "release-4.4", number: 3, body: "[release-4.4] Bug 123: fixed it!", htmlUrl: "http.com", login: "user", cherrypick: true, cherrypickFromPRNum: 2, cherrypickTo: "release-4.4",
+				org: "org", repo: "repo", baseRef: "release-4.4", number: 3, opened: true, body: "[release-4.4] Bug 123: fixed it!", htmlUrl: "http.com", login: "user", cherrypick: true, cherrypickFromPRNum: 2, cherrypickTo: "release-4.4", bugId: 123,
 			},
 		},
 		{
@@ -413,7 +442,7 @@ func TestDigestPR(t *testing.T) {
 				Changes: []byte(`{"title":{"from":"fixed it! (WIP)"}}`),
 			},
 			expected: &event{
-				org: "org", repo: "repo", baseRef: "branch", number: 1, bugId: 123, body: "Bug 123: fixed it!", htmlUrl: "http.com", login: "user",
+				org: "org", repo: "repo", baseRef: "branch", number: 1, opened: true, bugId: 123, body: "Bug 123: fixed it!", htmlUrl: "http.com", login: "user",
 			},
 		},
 		{
@@ -440,7 +469,7 @@ func TestDigestPR(t *testing.T) {
 				Changes: []byte(`{"title":{"from":"Bug 123: fixed it! (WIP)"}}`),
 			},
 			expected: &event{
-				org: "org", repo: "repo", baseRef: "branch", number: 1, missing: true, body: "fixed it!", htmlUrl: "http.com", login: "user",
+				org: "org", repo: "repo", baseRef: "branch", number: 1, opened: true, missing: true, body: "fixed it!", htmlUrl: "http.com", login: "user",
 			},
 		},
 		{
@@ -699,6 +728,7 @@ func TestHandle(t *testing.T) {
 		missing             bool
 		merged              bool
 		closed              bool
+		opened              bool
 		cherryPick          bool
 		cherryPickFromPRNum int
 		cherryPickTo        string
@@ -975,7 +1005,10 @@ Instructions for interacting with me using PR comments are available [here](http
 			}},
 			prs:     []github.PullRequest{{Number: base.number, Merged: true}},
 			options: plugins.BugzillaBranchOptions{StateAfterMerge: &plugins.BugzillaBugState{Status: "CLOSED", Resolution: "MERGED"}}, // no requirements --> always valid
-			expectedComment: `org/repo#1:@user: All pull requests linked via external trackers have merged: [org/repo#1](https://github.com/org/repo/pull/1). [Bugzilla bug 123](www.bugzilla/show_bug.cgi?id=123) has been moved to the CLOSED (MERGED) state.
+			expectedComment: `org/repo#1:@user: All pull requests linked via external trackers have merged:
+ * [org/repo#1](https://github.com/org/repo/pull/1)
+
+[Bugzilla bug 123](www.bugzilla/show_bug.cgi?id=123) has been moved to the CLOSED (MERGED) state.
 
 <details>
 
@@ -1000,7 +1033,10 @@ Instructions for interacting with me using PR comments are available [here](http
 			}},
 			prs:     []github.PullRequest{{Number: base.number, Merged: true}},
 			options: plugins.BugzillaBranchOptions{StateAfterMerge: &modified}, // no requirements --> always valid
-			expectedComment: `org/repo#1:@user: All pull requests linked via external trackers have merged: [org/repo#1](https://github.com/org/repo/pull/1). [Bugzilla bug 123](www.bugzilla/show_bug.cgi?id=123) has been moved to the MODIFIED state.
+			expectedComment: `org/repo#1:@user: All pull requests linked via external trackers have merged:
+ * [org/repo#1](https://github.com/org/repo/pull/1)
+
+[Bugzilla bug 123](www.bugzilla/show_bug.cgi?id=123) has been moved to the MODIFIED state.
 
 <details>
 
@@ -1029,7 +1065,11 @@ Instructions for interacting with me using PR comments are available [here](http
 			}},
 			prs:     []github.PullRequest{{Number: base.number, Merged: true}, {Number: 22, Merged: true}},
 			options: plugins.BugzillaBranchOptions{StateAfterMerge: &modified}, // no requirements --> always valid
-			expectedComment: `org/repo#1:@user: All pull requests linked via external trackers have merged: [org/repo#1](https://github.com/org/repo/pull/1), [org/repo#22](https://github.com/org/repo/pull/22). [Bugzilla bug 123](www.bugzilla/show_bug.cgi?id=123) has been moved to the MODIFIED state.
+			expectedComment: `org/repo#1:@user: All pull requests linked via external trackers have merged:
+ * [org/repo#1](https://github.com/org/repo/pull/1)
+ * [org/repo#22](https://github.com/org/repo/pull/22)
+
+[Bugzilla bug 123](www.bugzilla/show_bug.cgi?id=123) has been moved to the MODIFIED state.
 
 <details>
 
@@ -1066,9 +1106,15 @@ Instructions for interacting with me using PR comments are available [here](http
 				{BugzillaBugID: 123, ExternalBugID: "org/repo/pull/1", Org: "org", Repo: "repo", Num: 1},
 				{BugzillaBugID: 123, ExternalBugID: "org/repo/pull/22", Org: "org", Repo: "repo", Num: 22},
 			},
-			expectedComment: `org/repo#1:@user: Some pull requests linked via external trackers have merged: [org/repo#1](https://github.com/org/repo/pull/1). The following pull requests linked via external trackers have not merged:
+			expectedComment: `org/repo#1:@user: Some pull requests linked via external trackers have merged:
+ * [org/repo#1](https://github.com/org/repo/pull/1)
+
+The following pull requests linked via external trackers have not merged:
  * [org/repo#22](https://github.com/org/repo/pull/22) is open
-[Bugzilla bug 123](www.bugzilla/show_bug.cgi?id=123) has been moved to the MODIFIED state.
+
+These pull request must merge or be unlinked from the Bugzilla bug in order for it to move to the next state.
+
+[Bugzilla bug 123](www.bugzilla/show_bug.cgi?id=123) has not been moved to the MODIFIED state.
 
 <details>
 
@@ -1121,8 +1167,8 @@ Instructions for interacting with me using PR comments are available [here](http
 			}},
 			prs:     []github.PullRequest{{Number: base.number, Merged: true}},
 			options: plugins.BugzillaBranchOptions{StateAfterMerge: &modified}, // no requirements --> always valid
-			expectedComment: `org/repo#1:@user: An error was encountered searching for external tracker bugs for bug 123 on the Bugzilla server at www.bugzilla:
-> injected error adding external bug to bug
+			expectedComment: `org/repo#1:@user: An error was encountered searching for bug 123 on the Bugzilla server at www.bugzilla:
+> injected error getting bug
 Please contact an administrator to resolve this issue, then request a bug refresh with <code>/bugzilla refresh</code>.
 
 <details>
@@ -1198,6 +1244,76 @@ Instructions for interacting with me using PR comments are available [here](http
 			expectedBug: &bugzilla.Bug{ID: 123, Status: "CLOSED", Severity: "urgent"},
 		},
 		{
+			name:   "closed PR removes link, changes bug state, and comments",
+			merged: false,
+			closed: true,
+			bugs:   []bugzilla.Bug{{ID: 123, Status: "POST", Severity: "urgent"}},
+			externalBugs: []bugzilla.ExternalBug{{
+				BugzillaBugID: base.bugId,
+				ExternalBugID: fmt.Sprintf("%s/%s/pull/%d", base.org, base.repo, base.number),
+				Org:           base.org, Repo: base.repo, Num: base.number,
+			}},
+			prs:     []github.PullRequest{{Number: base.number, Merged: false}},
+			options: plugins.BugzillaBranchOptions{AddExternalLink: &yes, StateAfterClose: &plugins.BugzillaBugState{Status: "NEW"}},
+			expectedComment: `org/repo#1:@user: This pull request references [Bugzilla bug 123](www.bugzilla/show_bug.cgi?id=123). The bug has been updated to no longer refer to the pull request using the external bug tracker. All external bug links have been closed. The bug has been moved to the NEW state.
+
+<details>
+
+In response to [this](http.com):
+
+>Bug 123: fixed it!
+
+
+Instructions for interacting with me using PR comments are available [here](https://git.k8s.io/community/contributors/guide/pull-requests.md).  If you have questions or suggestions related to my behavior, please file an issue against the [kubernetes/test-infra](https://github.com/kubernetes/test-infra/issues/new?title=Prow%20issue:) repository.
+</details>`,
+			expectedBug:          &bugzilla.Bug{ID: 123, Status: "NEW", Severity: "urgent"},
+			expectedExternalBugs: []bugzilla.ExternalBug{},
+		},
+		{
+			name:        "closed PR with missing bug does nothing",
+			merged:      false,
+			closed:      true,
+			missing:     true,
+			bugs:        []bugzilla.Bug{},
+			prs:         []github.PullRequest{{Number: base.number, Merged: false}},
+			options:     plugins.BugzillaBranchOptions{AddExternalLink: &yes, StateAfterClose: &plugins.BugzillaBugState{Status: "NEW"}},
+			expectedBug: &bugzilla.Bug{},
+		},
+		{
+			name:   "closed PR with multiple exernal links removes link, does not change bug state, and comments",
+			merged: false,
+			closed: true,
+			bugs:   []bugzilla.Bug{{ID: 123, Status: "POST", Severity: "urgent"}},
+			externalBugs: []bugzilla.ExternalBug{{
+				BugzillaBugID: base.bugId,
+				ExternalBugID: fmt.Sprintf("%s/%s/pull/%d", base.org, base.repo, base.number),
+				Org:           base.org, Repo: base.repo, Num: base.number,
+			}, {
+				BugzillaBugID: base.bugId,
+				ExternalBugID: fmt.Sprintf("%s/%s/pull/%d", base.org, base.repo, 42),
+				Org:           base.org, Repo: base.repo, Num: 42,
+			}},
+			prs:     []github.PullRequest{{Number: base.number, Merged: false}},
+			options: plugins.BugzillaBranchOptions{AddExternalLink: &yes, StateAfterClose: &plugins.BugzillaBugState{Status: "NEW"}},
+			expectedComment: `org/repo#1:@user: This pull request references [Bugzilla bug 123](www.bugzilla/show_bug.cgi?id=123). The bug has been updated to no longer refer to the pull request using the external bug tracker.
+
+<details>
+
+In response to [this](http.com):
+
+>Bug 123: fixed it!
+
+
+Instructions for interacting with me using PR comments are available [here](https://git.k8s.io/community/contributors/guide/pull-requests.md).  If you have questions or suggestions related to my behavior, please file an issue against the [kubernetes/test-infra](https://github.com/kubernetes/test-infra/issues/new?title=Prow%20issue:) repository.
+</details>`,
+			expectedBug: &bugzilla.Bug{ID: 123, Status: "POST", Severity: "urgent"},
+			expectedExternalBugs: []bugzilla.ExternalBug{{
+				BugzillaBugID: base.bugId,
+				ExternalBugID: fmt.Sprintf("%s/%s/pull/%d", base.org, base.repo, 42),
+				Org:           base.org, Repo: base.repo, Num: 42,
+			}},
+		},
+		{
 			name:                "Cherrypick PR results in cloned bug creation",
 			bugs:                []bugzilla.Bug{{Product: "Test", Component: []string{"TestComponent"}, TargetRelease: []string{"v2"}, ID: 123, Status: "CLOSED", Severity: "urgent"}},
 			bugComments:         map[int][]bugzilla.Comment{123: {{BugID: 123, Count: 0, Text: "This is a bug"}}},
@@ -1255,7 +1371,7 @@ Instructions for interacting with me using PR comments are available [here](http
 			cherryPickFromPRNum: 1,
 			cherryPickTo:        "v1",
 			options:             plugins.BugzillaBranchOptions{TargetRelease: &v1},
-			expectedComment: `org/repo#1:@user: Failed to create a cherry-pick bug in Bugzilla: An error was encountered searching for bug 123 on the Bugzilla server at www.bugzilla:
+			expectedComment: `org/repo#1:@user: An error was encountered searching for bug 123 on the Bugzilla server at www.bugzilla:
 > injected error getting bug
 Please contact an administrator to resolve this issue, then request a bug refresh with <code>/bugzilla refresh</code>.
 
@@ -1409,6 +1525,90 @@ In response to [this](http.com):
 
 Instructions for interacting with me using PR comments are available [here](https://git.k8s.io/community/contributors/guide/pull-requests.md).  If you have questions or suggestions related to my behavior, please file an issue against the [kubernetes/test-infra](https://github.com/kubernetes/test-infra/issues/new?title=Prow%20issue:) repository.
 </details>`,
+		}, {
+			name:    "Bug with non-allowed group is ignored",
+			bugs:    []bugzilla.Bug{{ID: 123, Groups: []string{"security"}}},
+			options: plugins.BugzillaBranchOptions{AllowedGroups: []string{"internal"}},
+			prs:     []github.PullRequest{{Number: base.number, Body: base.body, Title: base.body}},
+			// there should be no comment returned in this test case
+		}, {
+			name:           "Bug with non-allowed group on repo with no allowed groups results in comment on /bugzilla refresh",
+			bugs:           []bugzilla.Bug{{ID: 123, Groups: []string{"security"}}},
+			prs:            []github.PullRequest{{Number: base.number, Body: base.body, Title: base.body}},
+			body:           "/bugzilla refresh",
+			expectedLabels: []string{"bugzilla/valid-bug"},
+			expectedComment: `org/repo#1:@user: This pull request references [Bugzilla bug 123](www.bugzilla/show_bug.cgi?id=123), which is valid.
+
+<details><summary>No validations were run on this bug</summary></details>
+
+<details>
+
+In response to [this](http.com):
+
+>/bugzilla refresh
+
+
+Instructions for interacting with me using PR comments are available [here](https://git.k8s.io/community/contributors/guide/pull-requests.md).  If you have questions or suggestions related to my behavior, please file an issue against the [kubernetes/test-infra](https://github.com/kubernetes/test-infra/issues/new?title=Prow%20issue:) repository.
+</details>`,
+		}, {
+			name:    "Bug with non-allowed group on repo with different allowed groups results in comment on /bugzilla refresh",
+			bugs:    []bugzilla.Bug{{ID: 123, Groups: []string{"security"}}},
+			prs:     []github.PullRequest{{Number: base.number, Body: base.body, Title: base.body}},
+			body:    "/bugzilla refresh",
+			options: plugins.BugzillaBranchOptions{AllowedGroups: []string{"internal"}},
+			expectedComment: `org/repo#1:@user: [Bugzilla bug 123](www.bugzilla/show_bug.cgi?id=123) is in a bug group that is not in the allowed groups for this repo.
+Allowed groups for this repo are:
+- internal
+
+<details>
+
+In response to [this](http.com):
+
+>/bugzilla refresh
+
+
+Instructions for interacting with me using PR comments are available [here](https://git.k8s.io/community/contributors/guide/pull-requests.md).  If you have questions or suggestions related to my behavior, please file an issue against the [kubernetes/test-infra](https://github.com/kubernetes/test-infra/issues/new?title=Prow%20issue:) repository.
+</details>`,
+		}, {
+			name:    "Bug with non-allowed group on repo with different allowed groups results in comment on PR creation",
+			bugs:    []bugzilla.Bug{{ID: 123, Groups: []string{"security"}}},
+			prs:     []github.PullRequest{{Number: base.number, Body: base.body, Title: base.body}},
+			body:    "/bugzilla refresh",
+			opened:  true,
+			options: plugins.BugzillaBranchOptions{AllowedGroups: []string{"internal"}},
+			expectedComment: `org/repo#1:@user: [Bugzilla bug 123](www.bugzilla/show_bug.cgi?id=123) is in a bug group that is not in the allowed groups for this repo.
+Allowed groups for this repo are:
+- internal
+
+<details>
+
+In response to [this](http.com):
+
+>/bugzilla refresh
+
+
+Instructions for interacting with me using PR comments are available [here](https://git.k8s.io/community/contributors/guide/pull-requests.md).  If you have questions or suggestions related to my behavior, please file an issue against the [kubernetes/test-infra](https://github.com/kubernetes/test-infra/issues/new?title=Prow%20issue:) repository.
+</details>`,
+		}, {
+			name:           "Bug with allowed group is properly handled",
+			bugs:           []bugzilla.Bug{{ID: 123, Severity: "medium", Groups: []string{"security"}}},
+			options:        plugins.BugzillaBranchOptions{StateAfterValidation: &updated, AllowedGroups: []string{"security"}},
+			labels:         []string{"bugzilla/invalid-bug"},
+			expectedLabels: []string{"bugzilla/valid-bug", "bugzilla/severity-medium"},
+			expectedComment: `org/repo#1:@user: This pull request references [Bugzilla bug 123](www.bugzilla/show_bug.cgi?id=123), which is valid. The bug has been moved to the UPDATED state.
+
+<details><summary>No validations were run on this bug</summary></details>
+
+<details>
+
+In response to [this](http.com):
+
+>Bug 123: fixed it!
+
+
+Instructions for interacting with me using PR comments are available [here](https://git.k8s.io/community/contributors/guide/pull-requests.md).  If you have questions or suggestions related to my behavior, please file an issue against the [kubernetes/test-infra](https://github.com/kubernetes/test-infra/issues/new?title=Prow%20issue:) repository.
+</details>`,
+			expectedBug: &bugzilla.Bug{ID: 123, Status: "UPDATED", Severity: "medium", Groups: []string{"security"}},
 		},
 	}
 
@@ -1449,6 +1649,7 @@ Instructions for interacting with me using PR comments are available [here](http
 			e.missing = testCase.missing
 			e.merged = testCase.merged
 			e.closed = testCase.closed || testCase.merged
+			e.opened = testCase.opened
 			e.cherrypick = testCase.cherryPick
 			e.cherrypickFromPRNum = testCase.cherryPickFromPRNum
 			e.cherrypickTo = testCase.cherryPickTo
@@ -1933,6 +2134,50 @@ func TestUpdateTitleBugID(t *testing.T) {
 		}
 		if newTitle != testCase.expected {
 			t.Errorf("%s: Expected `%s`, got `%s`", testCase.name, testCase.expected, newTitle)
+		}
+	}
+}
+
+func TestIsBugAllowed(t *testing.T) {
+	testCases := []struct {
+		name     string
+		bug      *bugzilla.Bug
+		groups   []string
+		expected bool
+	}{
+		{
+			name:     "no groups configured means always allowed",
+			groups:   []string{},
+			expected: true,
+		},
+		{
+			name: "all groups matching is allowed",
+			bug: &bugzilla.Bug{
+				Groups: []string{"whoa", "really", "cool"},
+			},
+			groups:   []string{"whoa", "really", "cool"},
+			expected: true,
+		},
+		{
+			name: "some but not all groups matching is not allowed",
+			bug: &bugzilla.Bug{
+				Groups: []string{"whoa", "really", "cool"},
+			},
+			groups:   []string{"whoa", "really"},
+			expected: false,
+		},
+		{
+			name: "no groups matching is not allowed",
+			bug: &bugzilla.Bug{
+				Groups: []string{"whoa", "really", "cool"},
+			},
+			groups:   []string{"other"},
+			expected: false,
+		},
+	}
+	for _, testCase := range testCases {
+		if actual, expected := isBugAllowed(testCase.bug, testCase.groups), testCase.expected; actual != expected {
+			t.Errorf("%s: isBugAllowed returned %v incorrectly", testCase.name, actual)
 		}
 	}
 }
